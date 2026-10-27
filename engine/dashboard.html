@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Board</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a65; --line: #e4e2db;
+    --accent: #2f5d50; --accent-ink: #ffffff; --ok: #2f7d4f; --err: #b3412f; --warn: #a66a00; --run: #2d5fa8;
+    --chip: #efede6; --shadow: 0 1px 2px rgba(0,0,0,.05);
+    --r1: #2d5fa8; --r2: #8a4fb0; --r3: #2f7d4f; --r4: #b8622a; --r5: #a3405f; --r6: #3d7f8c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141413; --panel: #1e1e1c; --ink: #ecebe6; --muted: #9c9a92; --line: #2f2e2b;
+      --accent: #7fb8a4; --accent-ink: #10201b; --ok: #6cc28e; --err: #e9826f; --warn: #e0b04d; --run: #79a6e8;
+      --chip: #2a2926; --shadow: none;
+      --r1: #79a6e8; --r2: #c193e0; --r3: #6cc28e; --r4: #e7a06a; --r5: #e48aa7; --r6: #7cc4d1;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141413; --panel: #1e1e1c; --ink: #ecebe6; --muted: #9c9a92; --line: #2f2e2b;
+    --accent: #7fb8a4; --accent-ink: #10201b; --ok: #6cc28e; --err: #e9826f; --warn: #e0b04d; --run: #79a6e8;
+    --chip: #2a2926; --shadow: none;
+    --r1: #79a6e8; --r2: #c193e0; --r3: #6cc28e; --r4: #e7a06a; --r5: #e48aa7; --r6: #7cc4d1;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  .pill { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: var(--chip); color: var(--muted); }
+  .pill.live::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 6px; vertical-align: 1px; }
+  .pill.running { color: var(--run); }
+  .spacer { flex: 1; }
+  main { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(280px, .8fr); gap: 16px; padding: 16px 20px 40px; align-items: start; }
+  main.no-shortlist { grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); }
+  @media (max-width: 1150px) { main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } main:not(.no-shortlist) .side { grid-column: 1 / -1; } }
+  @media (max-width: 760px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px 32px; } header { padding: 12px 16px; } }
+  section.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 16px; min-width: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
+  .role { display: inline-block; font-size: 11.5px; font-weight: 650; padding: 1px 8px; border-radius: 999px; color: var(--panel); background: var(--muted); white-space: nowrap; }
+  .chain { border-left: 2px solid var(--line); padding: 2px 0 2px 12px; margin: 0 0 16px 4px; }
+  .chain-head { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .event { display: grid; grid-template-columns: 44px auto minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 5px 0; }
+  .event.fresh { animation: fade .5s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; } }
+  .event time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+  .event .what { min-width: 0; overflow-wrap: anywhere; }
+  .status { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; margin-left: 4px; }
+  .status.running { color: var(--run); } .status.done { color: var(--ok); } .status.error, .status.blocked, .status.unrouted, .status.invalid { color: var(--err); } .status.delivered { color: var(--warn); }
+  .status.running::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 5px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .meta { font-size: 12px; color: var(--muted); }
+  a, .link { color: var(--accent); text-decoration: none; cursor: pointer; }
+  a:hover, .link:hover { text-decoration: underline; }
+  .files { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; font-size: 12px; }
+  .paper { border-top: 1px solid var(--line); padding: 12px 0; }
+  .paper:first-of-type { border-top: 0; padding-top: 4px; }
+  .paper h3 { font-size: 14.5px; margin: 0 0 3px; line-height: 1.3; }
+  .scores { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  .score { font-size: 11.5px; background: var(--chip); padding: 1px 8px; border-radius: 6px; }
+  .why { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--accent); }
+  .fb { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 5px 11px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.on-useful { background: var(--ok); color: var(--panel); border-color: var(--ok); }
+  button.on-not { background: var(--err); color: var(--panel); border-color: var(--err); }
+  button:disabled { opacity: .5; cursor: default; }
+  input, select, textarea { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 7px; padding: 7px 9px; }
+  textarea { min-height: 96px; resize: vertical; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 3px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  .note { border-top: 1px solid var(--line); padding: 8px 0; }
+  .note:first-of-type { border-top: 0; }
+  .note pre, .modal pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 6px 0 0; }
+  details summary { cursor: pointer; }
+  select.date { width: auto; padding: 2px 6px; font-size: 12px; }
+  .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 5; }
+  .modal-bg.show { display: flex; }
+  .modal { background: var(--panel); border-radius: 10px; max-width: 820px; width: 100%; max-height: 85vh; overflow: auto; padding: 16px 18px; border: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="board-name">Agent Board</h1>
+  <span id="live" class="pill">connecting…</span>
+  <span id="running" class="pill running" hidden></span>
+  <span class="spacer"></span>
+  <span id="buttons" style="display:flex;gap:8px;flex-wrap:wrap"></span>
+</header>
+
+<main id="main">
+  <div>
+    <section class="card">
+      <h2>Timeline</h2>
+      <div id="timeline"></div>
+    </section>
+  </div>
+
+  <div id="shortlist-col">
+    <section class="card">
+      <h2>Shortlist <select id="date" class="date"></select></h2>
+      <div id="shortlist"></div>
+      <div class="actions" id="fb-actions" hidden>
+        <button class="primary" id="send-fb">Send feedback</button>
+        <span class="small muted" id="fb-status"></span>
+      </div>
+    </section>
+  </div>
+
+  <div class="side">
+    <section class="card">
+      <h2>Post a note</h2>
+      <form id="note-form">
+        <div class="row">
+          <div><label for="to">To</label><select id="to"></select></div>
+          <div><label for="type">Type</label><input id="type" value="request"></div>
+        </div>
+        <label for="subject">Subject</label>
+        <input id="subject" placeholder="One line: what this note is about">
+        <label for="body">Body</label>
+        <textarea id="body" placeholder="What should the agent do?"></textarea>
+        <div class="actions"><button class="primary" type="submit">Post to inbox</button></div>
+      </form>
+    </section>
+    <section class="card" id="resident-card" hidden>
+      <h2>Resident agents</h2>
+      <div id="resident"></div>
+    </section>
+    <section class="card">
+      <h2 id="human-title">Notes for you</h2>
+      <div id="human-notes"></div>
+    </section>
+    <section class="card">
+      <h2>Inbox</h2>
+      <div id="inbox"></div>
+    </section>
+  </div>
+</main>
+
+<div class="modal-bg" id="modal-bg"><div class="modal"><div class="actions" style="margin:0 0 6px"><strong id="modal-title"></strong><span class="spacer" style="flex:1"></span><button id="modal-close">Close</button></div><pre id="modal-text"></pre></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const hhmm = (ts) => (ts || "").slice(11, 16);
+let state = null, selectedDate = null, marks = {}, drafts = {};
+const shown = new Set();  // timeline items already drawn, so only new ones animate
+
+const ROLE_COLORS = ["--r1", "--r2", "--r3", "--r4", "--r5", "--r6"];
+const roleColor = (role) => {
+  const fixed = { dispatcher: "--r6", intranet: "--r5", [state?.board?.human || "human"]: "--r4" };
+  if (fixed[role]) return `var(${fixed[role]})`;
+  let h = 0; for (const c of role || "") h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return `var(${ROLE_COLORS[h % ROLE_COLORS.length]})`;
+};
+const roleBadge = (role) => `<span class="role" style="background:${roleColor(role)}">${esc(role)}</span>`;
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+async function refresh() {
+  const firstRenderDone = state?.firstRenderDone;
+  state = await api("/api/state" + (selectedDate ? `?date=${selectedDate}` : ""));
+  state.firstRenderDone = firstRenderDone;
+  render();
+}
+
+function render() {
+  renderHeader(); renderTimeline(); renderSide();
+  // Don't redraw the shortlist under someone typing a comment; it redraws on blur.
+  const hasShortlist = !!state.shortlist;
+  $("shortlist-col").hidden = !hasShortlist;
+  $("main").classList.toggle("no-shortlist", !hasShortlist);
+  if (hasShortlist && !document.activeElement?.matches?.("#shortlist input")) renderShortlist();
+}
+
+// Pair each run's start and finish; everything else is a one-off event.
+function buildChains() {
+  const runs = new Map(), chains = new Map();
+  const add = (chain, item) => {
+    const key = chain || "system";
+    if (!chains.has(key)) chains.set(key, []);
+    chains.get(key).push(item);
+  };
+  for (const e of state.activity) {
+    if (e.run) {
+      let r = runs.get(e.run);
+      if (!r) { r = { kind: "run", start: e, end: null, ts: e.ts, chain: e.chain }; runs.set(e.run, r); add(e.chain, r); }
+      if (e.event !== "start") r.end = e;
+    } else {
+      add(e.chain, { kind: "event", e, ts: e.ts });
+    }
+  }
+  return [...chains.entries()]
+    .map(([id, items]) => ({ id, items, last: items.reduce((m, i) => (i.end?.ts || i.ts) > m ? (i.end?.ts || i.ts) : m, "") }))
+    .sort((a, b) => b.last.localeCompare(a.last))
+    .slice(0, 15);
+}
+
+function fileLinks(files) {
+  if (!files || !files.length) return "";
+  return `<div class="files">${files.map((f) => `<span class="link" data-file="${esc(f)}">${esc(f.split("/").pop())}</span>`).join("")}</div>`;
+}
+
+function renderTimeline() {
+  const chains = buildChains();
+  const running = [...state.activity.reduce((m, e) => { if (e.run) { e.event === "start" ? m.set(e.run, e) : m.delete(e.run); } return m; }, new Map()).values()];
+  $("running").hidden = !running.length;
+  $("running").textContent = `${running.length} running`;
+  if (!chains.length) { $("timeline").innerHTML = `<div class="empty">Nothing yet. Post a note to get started.</div>`; return; }
+  $("timeline").innerHTML = chains.map((c) => {
+    const first = c.items[0];
+    const label = c.id === "system" ? "System" : `Chain ${esc(c.id)}`;
+    const date = (first.ts || "").slice(0, 10);
+    return `<div class="chain"><div class="chain-head">${label} · ${esc(date)}</div>${c.items.map(renderItem).join("")}</div>`;
+  }).join("");
+  state.firstRenderDone = true;
+}
+
+function freshClass(key) {
+  if (shown.has(key)) return "";
+  shown.add(key);
+  return state.firstRenderDone ? " fresh" : "";
+}
+
+function renderItem(item) {
+  if (item.kind === "event") {
+    const e = item.e;
+    return `<div class="event${freshClass(e.ts + e.role + e.event + (e.trigger || ""))}"><time>${hhmm(e.ts)}</time><span>${roleBadge(e.role)}</span>
+      <div class="what"><span class="status ${esc(e.event)}">${esc(e.event)}</span> ${esc(e.outcome || "")}
+      ${e.trigger ? `<div class="meta">from ${esc(e.trigger)}</div>` : ""}${fileLinks(e.files)}</div></div>`;
+  }
+  const s = item.start, end = item.end;
+  const status = end ? end.event : "running";
+  const outcome = end ? end.outcome : s.outcome;
+  const bits = [`triggered by ${esc(s.trigger)}`];
+  if (end?.duration_s != null) bits.push(`${end.duration_s}s`);
+  if (end?.cost_usd) bits.push(`$${end.cost_usd.toFixed(2)}`);
+  if (end?.denied?.length) bits.push(`<span style="color:var(--err)">denied: ${esc(end.denied.join(", "))}</span>`);
+  return `<div class="event${freshClass(s.run + status)}"><time>${hhmm(s.ts)}</time><span>${roleBadge(s.role)}</span>
+    <div class="what"><span class="status ${esc(status)}">${esc(status)}</span> ${esc(outcome || "")}
+    <div class="meta">${bits.join(" · ")}</div>${fileLinks(end?.files)}</div></div>`;
+}
+
+function renderShortlist() {
+  const sl = state.shortlist;
+  selectedDate = sl.date;
+  const dates = sl.dates.includes(sl.date) ? sl.dates : [sl.date, ...sl.dates];
+  $("date").innerHTML = dates.map((d) => `<option ${d === sl.date ? "selected" : ""}>${esc(d)}</option>`).join("");
+  const fb = { ...sl.feedback, ...marks };
+  if (sl.error) { $("shortlist").innerHTML = `<div class="empty" style="color:var(--err)">${esc(sl.error)}</div>`; $("fb-actions").hidden = true; return; }
+  if (!sl.data) { $("shortlist").innerHTML = `<div class="empty">No shortlist for ${esc(sl.date)} yet.</div>`; $("fb-actions").hidden = true; return; }
+  const items = sl.data.items || [];
+  const summary = sl.data.summary ? `<p class="muted" style="margin-top:0">${esc(sl.data.summary)}</p>` : "";
+  const cards = items.map((p) => {
+    const mark = fb[p.id] || {};
+    return `<div class="paper">
+      <h3><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></h3>
+      <div class="meta">${esc(p.authors || "")}${p.venue ? " · " + esc(p.venue) : ""}${p.date ? " · " + esc(p.date) : ""}</div>
+      <div class="scores">${p.quality != null ? `<span class="score">Quality ${esc(p.quality)}/5</span>` : ""}${p.relevance != null ? `<span class="score">Relevance ${esc(p.relevance)}/5</span>` : ""}${(p.tags || []).map((t) => `<span class="score">${esc(t)}</span>`).join("")}</div>
+      ${p.summary ? `<div>${esc(p.summary)}</div>` : ""}
+      ${p.why ? `<div class="why">${esc(p.why)}</div>` : ""}
+      <div class="fb" data-id="${esc(p.id)}" data-title="${esc(p.title)}">
+        <button data-verdict="useful" class="${mark.verdict === "useful" ? "on-useful" : ""}">Useful</button>
+        <button data-verdict="not useful" class="${mark.verdict === "not useful" ? "on-not" : ""}">Not useful</button>
+        <input data-comment placeholder="Why? (optional)" value="${esc(drafts[p.id] ?? mark.comment ?? "")}" style="flex:1;min-width:140px;padding:4px 8px">
+        ${mark.sent ? `<span class="small muted">sent</span>` : ""}
+      </div></div>`;
+  }).join("");
+  const considered = (sl.data.considered || []).length
+    ? `<details class="small" style="margin-top:10px"><summary class="muted">${sl.data.considered.length} considered but left out</summary>${sl.data.considered.map((c) => `<div style="margin-top:6px"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a><div class="muted">${esc(c.reason || "")}</div></div>`).join("")}</details>` : "";
+  $("shortlist").innerHTML = summary + (cards || `<div class="empty">The curator found nothing worth shortlisting.</div>`) + considered;
+  const unsent = Object.values(fb).filter((m) => !m.sent).length;
+  $("fb-actions").hidden = !items.length;
+  $("send-fb").disabled = !unsent;
+  $("fb-status").textContent = unsent ? `${unsent} unsent` : "";
+}
+
+function renderHeader() {
+  const { name, human } = state.board;
+  document.title = name;
+  $("board-name").textContent = name;
+  $("human-title").textContent = `Notes for ${human.charAt(0).toUpperCase() + human.slice(1)}`;
+  const html = state.buttons.map((b, i) => `<button data-button="${i}" title="${esc(b.title)}">${esc(b.label)}</button>`).join("");
+  if ($("buttons").innerHTML !== html) $("buttons").innerHTML = html;
+}
+
+function renderSide() {
+  const roles = Object.keys(state.roles);
+  const current = $("to").value;
+  $("to").innerHTML = roles.map((r) => `<option ${r === current ? "selected" : ""}>${esc(r)}</option>`).join("");
+  $("human-notes").innerHTML = state.human_notes.length ? state.human_notes.map((n) => `
+    <div class="note"><details><summary>${roleBadge(n.from)} <strong>${esc(n.subject || n.type)}</strong> <span class="meta">${hhmm(n.created)} · ${esc(n.created.slice(0, 10))}</span></summary><pre>${esc(n.body)}</pre></details></div>`).join("")
+    : `<div class="empty">No notes.</div>`;
+  const resident = Object.entries(state.resident || {});
+  $("resident-card").hidden = !resident.length;
+  $("resident").innerHTML = resident.map(([role, s]) => `
+    <div class="note small">${roleBadge(role)}
+      ${s && s.runs ? `<span class="meta">${esc(s.month)} · ${s.runs} run${s.runs === 1 ? "" : "s"}</span>
+        <button class="small" data-open="${esc(role)}" style="float:right">Open in Claude</button>`
+        : `<span class="meta">no session yet: starts on its first run</span>`}
+    </div>`).join("");
+  const queue = [...state.processing.map((n) => ({ ...n, working: true })), ...state.inbox];
+  $("inbox").innerHTML = queue.length ? queue.map((n) => `
+    <div class="note small">${roleBadge(n.from)} → ${roleBadge(n.to)} ${esc(n.subject || n.type)} <span class="status ${n.working ? "running" : ""}">${n.working ? "working" : "waiting"}</span></div>`).join("")
+    : `<div class="empty">Empty. All notes handled.</div>`;
+}
+
+// Feedback: clicks are saved right away and sent to the curator in one note.
+$("shortlist").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-verdict]");
+  if (!btn) return;
+  const box = btn.closest(".fb");
+  const id = box.dataset.id;
+  const comment = box.querySelector("[data-comment]").value;
+  const mark = { verdict: btn.dataset.verdict, title: box.dataset.title, comment };
+  delete drafts[id];
+  marks[id] = { ...mark, sent: false };
+  renderShortlist();
+  await api("/api/feedback", { date: selectedDate, marks: { [id]: mark } });
+});
+$("shortlist").addEventListener("change", async (ev) => {
+  if (!ev.target.matches("[data-comment]")) return;
+  const box = ev.target.closest(".fb");
+  const existing = { ...state.shortlist.feedback, ...marks }[box.dataset.id];
+  if (!existing?.verdict) return;
+  const mark = { verdict: existing.verdict, title: box.dataset.title, comment: ev.target.value };
+  marks[box.dataset.id] = { ...mark, sent: false };
+  await api("/api/feedback", { date: selectedDate, marks: { [box.dataset.id]: mark } });
+});
+$("shortlist").addEventListener("input", (ev) => {
+  if (ev.target.matches("[data-comment]")) drafts[ev.target.closest(".fb").dataset.id] = ev.target.value;
+});
+// Delay so a click that moved focus out still lands on the button it was aimed at.
+$("shortlist").addEventListener("focusout", () => setTimeout(() => {
+  if (state && !document.activeElement?.matches?.("#shortlist input")) renderShortlist();
+}, 250));
+$("send-fb").addEventListener("click", async () => {
+  try {
+    await api("/api/feedback", { date: selectedDate, send: true });
+    marks = {};
+    toast("Feedback sent to the curator");
+    refresh();
+  } catch (e) { toast(e.message); }
+});
+$("date").addEventListener("change", (ev) => { selectedDate = ev.target.value; marks = {}; drafts = {}; refresh(); });
+
+$("note-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    await api("/api/note", { to: $("to").value, type: $("type").value, subject: $("subject").value, body: $("body").value });
+    $("subject").value = ""; $("body").value = "";
+    toast(`Posted to ${$("to").value}`);
+  } catch (e) { toast(e.message); }
+});
+// Quick buttons come from [[button]] tables in board.toml.
+$("buttons").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("[data-button]");
+  if (!btn) return;
+  const b = state.buttons[btn.dataset.button];
+  if (b.confirm && !confirm(b.confirm)) return;
+  try { const r = await api("/api/button", { index: Number(btn.dataset.button) }); toast(`Posted to ${r.to}`); }
+  catch (e) { toast(e.message); }
+});
+
+$("resident").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("[data-open]");
+  if (!btn) return;
+  try { await api("/api/open-session", { role: btn.dataset.open }); toast(`Opening the ${btn.dataset.open} session in Claude`); }
+  catch (e) { toast(e.message); }
+});
+
+document.addEventListener("click", async (ev) => {
+  const link = ev.target.closest("[data-file]");
+  if (!link) return;
+  try {
+    const f = await api(`/api/file?path=${encodeURIComponent(link.dataset.file)}`);
+    $("modal-title").textContent = f.path; $("modal-text").textContent = f.text; $("modal-bg").classList.add("show");
+  } catch (e) { toast(`Can't open ${link.dataset.file}`); }
+});
+$("modal-close").addEventListener("click", () => $("modal-bg").classList.remove("show"));
+$("modal-bg").addEventListener("click", (ev) => { if (ev.target === $("modal-bg")) $("modal-bg").classList.remove("show"); });
+
+function connect() {
+  const es = new EventSource("/api/stream");
+  es.addEventListener("change", () => refresh());
+  es.onopen = () => { $("live").textContent = "live"; $("live").classList.add("live"); };
+  es.onerror = () => { $("live").textContent = "reconnecting…"; $("live").classList.remove("live"); };
+}
+refresh().then(connect);
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""Open a resident agent's persistent session in the Claude desktop app.
+
+    open-agent curator             # this month's session
+    open-agent curator --previous  # last month's session
+    open-agent --list              # every resident session
+
+You see the agent's whole history and can talk to it. Anything you say there
+becomes part of its history for its next run, so it's a way to give it
+standing instructions too.
+"""
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "engine"))
+from boardlib import AGENTS, load_sessions  # noqa: E402
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("role", nargs="?")
+    parser.add_argument("--previous", action="store_true", help="open last month's session instead")
+    parser.add_argument("--list", action="store_true", help="list resident sessions and exit")
+    parser.add_argument("--terminal", action="store_true", help="resume in this terminal instead of the app")
+    args = parser.parse_args()
+
+    sessions = load_sessions()
+    if args.list or not args.role:
+        if not sessions:
+            print("No resident sessions yet. A resident role gets one on its first run.")
+        for role, entry in sessions.items():
+            for label, s in [("current", entry.get("current"))] + [("previous", p) for p in reversed(entry.get("previous", []))]:
+                if s:
+                    print(f"{role:10} {label:8} {s['month']}  {s.get('runs', 0):3} runs  {s['id']}")
+        return
+
+    entry = sessions.get(args.role)
+    session = None
+    if entry:
+        session = (entry.get("previous") or [None])[-1] if args.previous else entry.get("current")
+    if not session or not session.get("runs"):
+        sys.exit(f"'{args.role}' has no session to open yet. It gets one on its first run as a resident role.")
+
+    claude = shutil.which("claude") or str(Path.home() / ".local/bin/claude")
+    cmd = [claude, "--resume", session["id"]] + ([] if args.terminal else ["--desktop"])
+    # Sessions belong to the folder they ran in, so resume from the agent's folder.
+    os.chdir(AGENTS / args.role)
+    if args.terminal:
+        os.execv(claude, cmd)
+    if not sys.stdout.isatty():
+        # --desktop refuses to run with redirected output; `script` gives it a pseudo-terminal.
+        cmd = ["script", "-q", "/dev/null", *cmd]
+    subprocess.run(cmd, check=False, stdin=subprocess.DEVNULL)
+
+
+if __name__ == "__main__":
+    main()

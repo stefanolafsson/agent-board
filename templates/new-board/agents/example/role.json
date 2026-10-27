@@ -1,0 +1,8 @@
+{
+  "description": "Example agent: reads a note, answers it, and sends the answer to the human.",
+  "model": "sonnet",
+  "tools": ["Read", "Glob", "Grep", "Bash", "WebSearch", "WebFetch"],
+  "allow": ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Bash(post-note *)"],
+  "max_budget_usd": 0.5,
+  "timeout_s": 600
+}

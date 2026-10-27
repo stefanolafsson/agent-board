@@ -1,0 +1,191 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["watchdog>=4"]
+# ///
+"""Run boards of collaborating Claude Code agents.
+
+    board init ~/somewhere/my-board --name "My board"   # create a new board
+    board up [BOARD]       # start watcher, dashboard and services in the background
+    board down [BOARD]     # stop them
+    board status [BOARD]   # is it running? which agents and sessions?
+    board run [BOARD]      # run in the foreground (Ctrl-C stops)
+    board morning [BOARD]  # `up`, then post the board's [morning] note once per day
+
+BOARD is a board folder (one with a board.toml). Without it, the current
+folder or the nearest one above it is used.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from datetime import date
+from pathlib import Path
+
+ENGINE = Path(__file__).resolve().parent.parent
+TEMPLATE = ENGINE / "templates" / "new-board"
+
+
+def use_board(path: str | None) -> None:
+    """Point the engine at a board, load its .env, and import boardlib."""
+    if path:
+        root = Path(path).expanduser().resolve()
+        if not (root / "board.toml").exists():
+            sys.exit(f"{root} is not a board (no board.toml). Create one with `board init {path}`.")
+        os.environ["BOARD_ROOT"] = str(root)
+    sys.path.insert(0, str(ENGINE / "engine"))
+    import boardlib
+    env_file = boardlib.ROOT / ".env"
+    if env_file.exists():  # secrets for agents and services, e.g. API keys or an MCP URL
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip())
+    os.environ["BOARD_ROOT"] = str(boardlib.ROOT)
+
+
+def pidfile() -> Path:
+    import boardlib
+    return boardlib.LOGS / "board.pid"
+
+
+def running_pid() -> int | None:
+    try:
+        pid = int(pidfile().read_text())
+        os.kill(pid, 0)
+        return pid
+    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
+        return None
+
+
+def cmd_run(args) -> None:
+    import boardlib
+    children = [subprocess.Popen([sys.executable, str(ENGINE / "engine" / "dashboard.py")], env=boardlib.child_env())]
+    for service in boardlib.CONFIG.get("service", []):
+        needs = service.get("requires_env")
+        if needs and not os.environ.get(needs):
+            print(f"skipping {service.get('name', service['command'])}: {needs} is not set", flush=True)
+            continue
+        command = [sys.executable if part == "python3" else part for part in service["command"]]
+        children.append(subprocess.Popen(command, cwd=boardlib.ROOT, env=boardlib.child_env()))
+    try:
+        import watcher
+        watcher.main()
+    finally:
+        for child in children:
+            child.terminate()
+
+
+def cmd_up(args) -> None:
+    import boardlib
+    pid = running_pid()
+    if pid:
+        print(f"{boardlib.NAME} is already running (pid {pid}): http://127.0.0.1:{boardlib.PORT}")
+        return
+    boardlib.LOGS.mkdir(parents=True, exist_ok=True)
+    log = (boardlib.LOGS / "board.log").open("a")
+    # A new session, so the board keeps running after whatever started it exits.
+    proc = subprocess.Popen([sys.executable, __file__, "run", str(boardlib.ROOT)], cwd=boardlib.ROOT,
+                            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    pidfile().write_text(str(proc.pid))
+    time.sleep(3)
+    if proc.poll() is not None:
+        sys.exit(f"{boardlib.NAME} stopped right away. See {boardlib.LOGS / 'board.log'}.")
+    print(f"{boardlib.NAME} started (pid {proc.pid}): http://127.0.0.1:{boardlib.PORT}")
+
+
+def cmd_down(args) -> None:
+    import boardlib
+    pid = running_pid()
+    if not pid:
+        print(f"{boardlib.NAME} isn't running.")
+        return
+    os.killpg(pid, signal.SIGTERM)  # the watcher, dashboard and services
+    pidfile().unlink(missing_ok=True)
+    print(f"{boardlib.NAME} stopped.")
+
+
+def cmd_status(args) -> None:
+    import boardlib
+    pid = running_pid()
+    print(f"{boardlib.NAME}  ({boardlib.ROOT})")
+    print(f"  {'running, pid ' + str(pid) if pid else 'not running'} · dashboard http://127.0.0.1:{boardlib.PORT}")
+    sessions = boardlib.load_sessions()
+    for role, cfg in boardlib.list_roles().items():
+        extra = ""
+        if cfg.get("resident"):
+            current = (sessions.get(role) or {}).get("current") or {}
+            extra = f"  resident, {current.get('runs', 0)} runs this month" if current else "  resident, no session yet"
+        print(f"  agent {role:12}{extra}")
+
+
+def morning_posted_today(morning: dict) -> bool:
+    import boardlib
+    stamp = f"{date.today():%Y%m%d}"
+    folders = (boardlib.INBOX, boardlib.PROCESSING, boardlib.ARCHIVE / f"{date.today():%Y-%m-%d}")
+    for path in (p for folder in folders for p in folder.glob(f"{stamp}-*.md")):
+        try:
+            if boardlib.read_note(path).type == morning.get("type", "morning"):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def cmd_morning(args) -> None:
+    import boardlib
+    cmd_up(args)
+    morning = boardlib.CONFIG.get("morning")
+    if not morning:
+        return
+    if morning_posted_today(morning):
+        print("Today's morning note was already posted.")
+        return
+    path = boardlib.post_note(boardlib.Note(to=morning["to"], sender=boardlib.HUMAN, type=morning.get("type", "morning"),
+                                            subject=morning.get("subject", "Morning"), body=morning.get("body", "")))
+    print(f"Posted {path.name}")
+
+
+def cmd_init(args) -> None:
+    root = Path(args.board or ".").expanduser().resolve()
+    if (root / "board.toml").exists():
+        sys.exit(f"{root} is already a board.")
+    if root.exists() and any(p for p in root.iterdir() if p.name != ".git"):
+        sys.exit(f"{root} isn't empty. Pick a new folder.")
+    shutil.copytree(TEMPLATE, root, dirs_exist_ok=True)
+    toml = (root / "board.toml").read_text(encoding="utf-8")
+    toml = toml.replace("{name}", args.name or root.name).replace("{human}", args.human).replace("{port}", str(args.port))
+    (root / "board.toml").write_text(toml, encoding="utf-8")
+    settings = (root / ".claude" / "settings.json").read_text(encoding="utf-8")
+    (root / ".claude" / "settings.json").write_text(settings.replace("{engine}", str(ENGINE)), encoding="utf-8")
+    if not (root / ".git").exists():
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root)
+    print(f"Created a board in {root}\nNext: add agents in agents/, then `board up {root}`.")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+    for name in ("up", "down", "status", "run", "morning"):
+        sub.add_parser(name).add_argument("board", nargs="?")
+    init = sub.add_parser("init")
+    init.add_argument("board", nargs="?")
+    init.add_argument("--name")
+    init.add_argument("--human", default=os.environ.get("USER", "human"))
+    init.add_argument("--port", type=int, default=8790)
+    args = parser.parse_args()
+
+    if args.command == "init":
+        return cmd_init(args)
+    use_board(args.board)
+    {"up": cmd_up, "down": cmd_down, "status": cmd_status, "run": cmd_run, "morning": cmd_morning}[args.command](args)
+
+
+if __name__ == "__main__":
+    main()

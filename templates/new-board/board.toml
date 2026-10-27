@@ -1,0 +1,30 @@
+# Settings for this board. The agent-board engine reads them.
+
+name = "{name}"      # shown on the dashboard
+human = "{human}"    # notes addressed to this name go to board/{human}/
+port = {port}        # dashboard: http://127.0.0.1:{port}
+
+# Quick buttons on the dashboard: each posts one note.
+# [[button]]
+# label = "Ask the example agent"
+# to = "example"
+# subject = "Hello"
+# body = "Say hello and tell me what you can do."
+
+# What `board morning` posts once a day (e.g. from a scheduled task).
+# [morning]
+# to = "example"
+# type = "morning"
+# subject = "Morning"
+# body = "Start the day."
+
+# Extra programs to run next to the watcher, e.g. a bridge that turns outside
+# events into notes. "python3" means the engine's Python.
+# [[service]]
+# name = "my bridge"
+# command = ["python3", "bin/my-bridge"]
+# requires_env = "MY_API_URL"   # skipped unless this is set (e.g. in .env)
+
+# A daily shortlist panel with feedback buttons (see the research board).
+# [shortlist]
+# feedback_to = "curator"
