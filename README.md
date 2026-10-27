@@ -22,9 +22,8 @@ its own board folder.
 Make an empty folder for your board, open Claude in it (the desktop app's Code
 tab, or `claude` in a terminal), and say what you want, for example:
 
-> Set up an agent board here with https://github.com/stefanolafsson/agent-board.
-> I want agents that find new funding calls every week that fit my research,
-> and help me draft applications.
+> Set up an agent board here using https://github.com/stefanolafsson/agent-board.
+> I want agents that ... [[click here for examples](setup-examples.md)] 
 
 That's all. Claude downloads the engine (once, to `~/agent-board`), then
 follows [SETUP.md](SETUP.md): it creates the board, asks what you need,
@@ -88,7 +87,7 @@ and picks a free dashboard port.
 
 ```toml
 name = "Research Board"     # dashboard title
-human = "stefan"            # notes to this name go to board/stefan/
+human = "yourname"            # notes to this name go to board/yourname/
 port = 8787
 # escalate_to = "some-agent" # failures go to you unless this names an agent
 
@@ -106,7 +105,7 @@ body = "Run the daily literature search."
 [[service]]                 # programs that run next to the watcher, e.g. bridges
 name = "intranet bridge"
 command = ["python3", "bin/intranet-bridge"]   # "python3" = the engine's Python
-requires_env = "HRAUNBJORG_MCP_URL"            # skipped unless set (e.g. in .env)
+requires_env = "SOME_MCP_URL"            # skipped unless set (e.g. in .env)
 
 [shortlist]                 # optional panel: board/shortlist/<date>.json items with Accept / Decline.
                             # Decisions go to <date>.feedback.json; an agent reads them on its next run.
