@@ -1,3 +1,5 @@
+# Set-up examples
+
 Here are examples as ready-to-paste endings for the set-up prompt:
 
 > "Set up an agent board here using https://github.com/stefanolafsson/agent-board. I want agents that …"
