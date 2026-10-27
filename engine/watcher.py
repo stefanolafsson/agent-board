@@ -3,7 +3,7 @@
 Watches board/inbox/. When a note arrives, the dispatcher decides what to do
 with it. It routes and splits work but never does the work itself:
 
-- `to: stefan`        -> moved to board/stefan/ for the dashboard
+- `to: <human>`       -> moved to board/<human>/ for the dashboard
 - `to: <role>`        -> one headless `claude -p` run per note, so several notes
                          to the same role fan out in parallel
 - join roles          -> roles with "join": true in role.json (e.g. the curator)

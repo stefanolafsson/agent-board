@@ -21,7 +21,7 @@ from boardlib import HUMAN, Note, new_chain_id, post_note  # noqa: E402
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--to", required=True, help="role to address, or 'stefan'")
+    parser.add_argument("--to", required=True, help="role to address, or the human's name from board.toml")
     parser.add_argument("--type", required=True, help="e.g. candidate, review, request, morning-search")
     parser.add_argument("--subject", default="", help="one-line subject")
     parser.add_argument("--body", help="markdown body (otherwise read from stdin)")
