@@ -39,7 +39,7 @@ echo 'export PATH="$HOME/Documents/github/agent-board/bin:$PATH"' >> ~/.zshrc
 board init ~/Documents/github/my-board --name "My board" --port 8790
 board up [BOARD]       # start watcher, dashboard and services in the background
 board down [BOARD]     # stop them
-board status [BOARD]   # running? today's runs, problems, cost, open proposals, agents
+board status [BOARD]   # running? today's runs, problems, cost, what's waiting, agents
 board run [BOARD]      # same as up, but in the foreground (Ctrl-C stops)
 board morning [BOARD]  # up, then post the board's [morning] note once per day
 ```
@@ -73,8 +73,7 @@ my-board/
 name = "Research Board"     # dashboard title
 human = "stefan"            # notes to this name go to board/stefan/
 port = 8787
-front_desk = "lead"         # default recipient in the dashboard's note box
-escalate_to = "lead"        # who hears about failed runs and blocked notes
+# escalate_to = "some-agent" # failures go to you unless this names an agent
 
 [[button]]                  # quick buttons on the dashboard, one note each
 label = "Run morning search"
@@ -92,8 +91,8 @@ name = "intranet bridge"
 command = ["python3", "bin/intranet-bridge"]   # "python3" = the engine's Python
 requires_env = "HRAUNBJORG_MCP_URL"            # skipped unless set (e.g. in .env)
 
-[shortlist]                 # optional daily-shortlist panel with feedback buttons
-feedback_to = "curator"
+[shortlist]                 # optional panel: board/shortlist/<date>.json items with Accept / Decline.
+                            # Decisions go to <date>.feedback.json; an agent reads them on its next run.
 ```
 
 ### role.json
@@ -112,32 +111,25 @@ feedback_to = "curator"
 }
 ```
 
-`add_dirs` gives the agent extra folders (`{root}` is the whole board folder; the lead uses it to read `agents/`). `tools` is what exists in the run, and `allow` is what may run without asking (anything
+`add_dirs` gives the agent extra folders (`{root}` is the whole board folder). `tools` is what exists in the run, and `allow` is what may run without asking (anything
 else is denied, since nobody is there to approve it). In `allow`, `{board}`
 becomes the board folder's absolute path, e.g. `Write({board}/knowledge/**)`.
 Agents that use MCP connectors need `ToolSearch` in `tools` and each tool's full
 name (`mcp__...`) in `allow`.
 
-## The lead agent (front desk)
+## Talking to a board: the lead is your Claude session
 
-New boards come with `agents/lead/`, a resident agent you talk to instead of
-addressing specialists yourself:
+Open Claude (the desktop app's Code tab, or `claude` in a terminal) in a board
+folder, and that session is the board's lead. The SessionStart hook gives it
+what changed on the board, your notes, and the board's `LEAD.md`. That file tells
+it how to address agents (`post-note`), check status (`board status`), explain
+failures, and change agents only after you agree. Agent runs never see `LEAD.md`.
 
-- **Requests:** tell it what you want (dashboard "Post a note", which defaults to
-  it, or `open-agent lead` in the Claude app). It posts the right notes to the
-  right agents.
-- **Status:** it runs `board status` and reports runs, problems, cost and what's waiting.
-- **Escalations:** with `escalate_to = "lead"` in `board.toml`, the watcher sends
-  it a note about every failed run, blocked chain, unknown recipient or broken
-  note (and denied tools, with `escalate_denied = true`). Nothing about the lead
-  itself or about an escalation is escalated, so this can't loop.
-- **Proposals:** it never changes agents on its own. It writes
-  `board/proposals/<date>-<slug>.md` (why, exact change, risk) and asks you. When
-  you answer "approve <file>" in a note or in the app, it applies exactly that
-  change. Its edits to `agents/` aren't auto-committed, so `git diff` shows them.
-
-The dispatcher stays plain code: the lead is where you talk, not a router every
-note passes through.
+Failed runs, blocked chains, notes to unknown agents and broken notes are
+reported to you as `escalation` notes in `board/<human>/`, so you see them on
+the dashboard and in the next session you open. To send them to an agent
+instead, set `escalate_to = "<agent>"` in `board.toml`. Nothing about that agent
+itself or about an escalation is escalated, so this can't loop.
 
 ## Notes
 

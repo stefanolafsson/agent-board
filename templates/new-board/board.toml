@@ -4,11 +4,11 @@ name = "{name}"      # shown on the dashboard
 human = "{human}"    # notes addressed to this name go to board/{human}/
 port = {port}        # dashboard: http://127.0.0.1:{port}
 
-# The lead agent is your front desk: the default in the dashboard's "Post a
-# note" box, and the agent that hears about failed runs and blocked notes.
-front_desk = "lead"
-escalate_to = "lead"
-# escalate_denied = true   # also report runs where a tool was denied
+# Failed runs, blocked chains and notes to unknown agents are reported to you,
+# as notes in board/{human}/. Uncomment to send them to an agent instead, or
+# to also report runs where a tool was denied.
+# escalate_to = "some-agent"
+# escalate_denied = true
 
 # Quick buttons on the dashboard: each posts one note.
 # [[button]]
@@ -31,6 +31,5 @@ escalate_to = "lead"
 # command = ["python3", "bin/my-bridge"]
 # requires_env = "MY_API_URL"   # skipped unless this is set (e.g. in .env)
 
-# A daily shortlist panel with feedback buttons (see the research board).
+# A daily shortlist panel with Accept / Decline buttons (see the research board).
 # [shortlist]
-# feedback_to = "curator"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Local dashboard for a board: live timeline, quick buttons, post a note, and
-(when the board enables it) a shortlist with feedback.
+"""Local dashboard for a board: live timeline, quick buttons, notes for the
+human, and (when the board enables it) a shortlist with Accept / Decline.
 
 Started by `board up` / `board run`. Standard library only; localhost only.
 The title, port, human's name, buttons and shortlist come from board.toml.
@@ -25,7 +25,7 @@ from boardlib import (  # noqa: E402
 
 PAGE = Path(__file__).resolve().parent / "dashboard.html"
 BUTTONS = CONFIG.get("button", [])        # [[button]] tables: quick notes posted with one click
-SHORTLIST_CONFIG = CONFIG.get("shortlist")  # [shortlist] table, or absent to hide the panel
+SHORTLIST_CONFIG = "shortlist" in CONFIG  # a [shortlist] table shows the panel
 
 
 def note_list(folder: Path, limit: int, with_body: bool = False) -> list[dict]:
@@ -74,7 +74,7 @@ def state(query: dict) -> dict:
         "processing": note_list(PROCESSING, 50),
         "human_notes": note_list(HUMAN_DIR, 20, with_body=True),
         "shortlist": shortlist(query.get("date", [None])[0]) if SHORTLIST_CONFIG else None,
-        "board": {"name": NAME, "human": HUMAN, "front_desk": CONFIG.get("front_desk")},
+        "board": {"name": NAME, "human": HUMAN},
         "buttons": [{"label": b["label"], "title": b.get("title", ""), "confirm": b.get("confirm", "")}
                     for b in BUTTONS],
     }
@@ -160,14 +160,6 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return self._json({"error": "invalid JSON"}, 400)
 
-        if url.path == "/api/note":
-            to = (data.get("to") or "").strip().lower()
-            if not to or not (data.get("body") or data.get("subject")):
-                return self._json({"error": "a note needs `to` and a subject or body"}, 400)
-            path = post_note(Note(to=to, sender=HUMAN, type=(data.get("type") or "request").strip(),
-                                  subject=(data.get("subject") or "").strip(), body=data.get("body") or ""))
-            return self._json({"ok": True, "note": path.name})
-
         if url.path == "/api/open-session":
             # Opens a resident agent's persistent session in the Claude desktop app.
             role = data.get("role", "")
@@ -193,29 +185,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "note": path.name, "to": button["to"]})
 
         if url.path == "/api/feedback" and SHORTLIST_CONFIG:
-            # Marks are saved as you click; "send" posts the unsent ones to the curator as one note.
+            # One Accept / Decline per item, saved as it's clicked. The agent that keeps
+            # the shortlist reads decisions it hasn't processed yet on its next run.
             day = data.get("date") or f"{date.today():%Y-%m-%d}"
+            item_id = data.get("id")
+            if not item_id or data.get("decision") not in ("accepted", "declined", None):
+                return self._json({"error": "send an id and a decision (accepted, declined or null)"}, 400)
             feedback = load_feedback(day)
-            for item_id, mark in (data.get("marks") or {}).items():
-                feedback[item_id] = {**feedback.get(item_id, {}), **mark, "sent": False}
-            note_name = None
-            if data.get("send"):
-                unsent = {k: v for k, v in feedback.items() if not v.get("sent")}
-                if not unsent:
-                    return self._json({"error": "no new feedback to send"}, 400)
-                lines = [f"{HUMAN.capitalize()}'s feedback on the shortlist for {day}:", ""]
-                for item_id, mark in unsent.items():
-                    comment = f": {mark['comment']}" if mark.get("comment") else ""
-                    lines.append(f"- **{mark.get('verdict', '?')}**: {mark.get('title', item_id)} ({item_id}){comment}")
-                if SHORTLIST_CONFIG.get("feedback_hint"):
-                    lines += ["", SHORTLIST_CONFIG["feedback_hint"]]
-                note_name = post_note(Note(to=SHORTLIST_CONFIG.get("feedback_to", "curator"), sender=HUMAN, type="feedback",
-                                           subject=f"Feedback on {day} shortlist", body="\n".join(lines))).name
-                for mark in unsent.values():
-                    mark["sent"] = True
+            if data["decision"] is None:
+                feedback.pop(item_id, None)
+            else:
+                feedback[item_id] = {"decision": data["decision"], "title": data.get("title", ""),
+                                     "at": now().isoformat(), "processed": False}
             SHORTLIST.mkdir(parents=True, exist_ok=True)
             feedback_path(day).write_text(json.dumps(feedback, indent=2, ensure_ascii=False), encoding="utf-8")
-            return self._json({"ok": True, "feedback": feedback, "note": note_name})
+            return self._json({"ok": True})
 
         self._json({"error": "not found"}, 404)
 

@@ -48,7 +48,7 @@ MAX_HOPS = int(os.environ.get("BOARD_MAX_HOPS", 6))
 MAX_RUNS_PER_CHAIN = int(os.environ.get("BOARD_MAX_RUNS_PER_CHAIN", 40))
 MAX_PARALLEL = int(os.environ.get("BOARD_MAX_PARALLEL", 4))
 HOOK = Path(__file__).resolve().parent / "session_start.py"
-ESCALATE_TO = CONFIG.get("escalate_to")              # agent told about failures (board.toml)
+ESCALATE_TO = CONFIG.get("escalate_to", HUMAN)       # who hears about failures: the human, or an agent
 ESCALATE_DENIED = CONFIG.get("escalate_denied", False)  # also tell it about denied tools?
 CLAUDE = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or str(Path.home() / ".local/bin/claude")
 
@@ -230,12 +230,13 @@ class Dispatcher:
 
 
 def escalate(entry: dict) -> None:
-    """Post a note about a failed run, blocked chain or bad note to the escalation agent.
+    """Post a note about a failed run, blocked chain or bad note to the human (or escalate_to agent).
 
     It starts a new chain, and nothing about the escalation agent itself or about
     an escalation note is escalated, so escalations can't loop.
     """
-    if not ESCALATE_TO or ESCALATE_TO not in list_roles() or entry.get("role") == ESCALATE_TO:
+    to_agent = ESCALATE_TO != HUMAN
+    if not ESCALATE_TO or (to_agent and ESCALATE_TO not in list_roles()) or entry.get("role") == ESCALATE_TO:
         return
     if "escalation" in (entry.get("trigger") or ""):
         return
@@ -251,8 +252,9 @@ def escalate(entry: dict) -> None:
     if entry.get("run"):
         facts.append(f"- raw output of the run: logs/runs/{entry['run']}.json")
     facts += [f"- file: board/{f}" for f in entry.get("files", []) + entry.get("notes", [])]
-    body = "\n".join(["The watcher reports a problem on the board.", "", *facts, "",
-                      "Find out why, fix what you're allowed to fix, and tell the human if it needs a decision."])
+    next_step = ("Find out why, fix what you're allowed to fix, and tell the human if it needs a decision."
+                 if to_agent else "Open a Claude session in the board folder and ask it to look into this.")
+    body = "\n".join(["The watcher reports a problem on the board.", "", *facts, "", next_step])
     post_note(Note(to=ESCALATE_TO, sender="dispatcher", type="escalation",
                    subject=f"{entry['event']}: {entry.get('role')}: {str(entry.get('outcome', ''))[:70]}", body=body))
 

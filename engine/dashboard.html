@@ -111,28 +111,10 @@
     <section class="card">
       <h2>Shortlist <select id="date" class="date"></select></h2>
       <div id="shortlist"></div>
-      <div class="actions" id="fb-actions" hidden>
-        <button class="primary" id="send-fb">Send feedback</button>
-        <span class="small muted" id="fb-status"></span>
-      </div>
     </section>
   </div>
 
   <div class="side">
-    <section class="card">
-      <h2>Post a note</h2>
-      <form id="note-form">
-        <div class="row">
-          <div><label for="to">To</label><select id="to"></select></div>
-          <div><label for="type">Type</label><input id="type" value="request"></div>
-        </div>
-        <label for="subject">Subject</label>
-        <input id="subject" placeholder="One line: what this note is about">
-        <label for="body">Body</label>
-        <textarea id="body" placeholder="What should the agent do?"></textarea>
-        <div class="actions"><button class="primary" type="submit">Post to inbox</button></div>
-      </form>
-    </section>
     <section class="card" id="resident-card" hidden>
       <h2>Resident agents</h2>
       <div id="resident"></div>
@@ -155,7 +137,7 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const hhmm = (ts) => (ts || "").slice(11, 16);
-let state = null, selectedDate = null, marks = {}, drafts = {};
+let state = null, selectedDate = null;
 const shown = new Set();  // timeline items already drawn, so only new ones animate
 
 const ROLE_COLORS = ["--r1", "--r2", "--r3", "--r4", "--r5", "--r6"];
@@ -188,11 +170,10 @@ async function refresh() {
 
 function render() {
   renderHeader(); renderTimeline(); renderSide();
-  // Don't redraw the shortlist under someone typing a comment; it redraws on blur.
   const hasShortlist = !!state.shortlist;
   $("shortlist-col").hidden = !hasShortlist;
   $("main").classList.toggle("no-shortlist", !hasShortlist);
-  if (hasShortlist && !document.activeElement?.matches?.("#shortlist input")) renderShortlist();
+  if (hasShortlist) renderShortlist();
 }
 
 // Pair each run's start and finish; everything else is a one-off event.
@@ -203,7 +184,10 @@ function buildChains() {
     if (!chains.has(key)) chains.set(key, []);
     chains.get(key).push(item);
   };
+  // Only the latest "watcher started" line; older restarts are noise.
+  const lastOnline = state.activity.filter((e) => e.event === "online").pop();
   for (const e of state.activity) {
+    if (e.event === "online" && e !== lastOnline) continue;
     if (e.run) {
       let r = runs.get(e.run);
       if (!r) { r = { kind: "run", start: e, end: null, ts: e.ts, chain: e.chain }; runs.set(e.run, r); add(e.chain, r); }
@@ -228,7 +212,7 @@ function renderTimeline() {
   const running = [...state.activity.reduce((m, e) => { if (e.run) { e.event === "start" ? m.set(e.run, e) : m.delete(e.run); } return m; }, new Map()).values()];
   $("running").hidden = !running.length;
   $("running").textContent = `${running.length} running`;
-  if (!chains.length) { $("timeline").innerHTML = `<div class="empty">Nothing yet. Post a note to get started.</div>`; return; }
+  if (!chains.length) { $("timeline").innerHTML = `<div class="empty">Nothing yet. Agents' runs show up here as they happen.</div>`; return; }
   $("timeline").innerHTML = chains.map((c) => {
     const first = c.items[0];
     const label = c.id === "system" ? "System" : `Chain ${esc(c.id)}`;
@@ -268,13 +252,13 @@ function renderShortlist() {
   selectedDate = sl.date;
   const dates = sl.dates.includes(sl.date) ? sl.dates : [sl.date, ...sl.dates];
   $("date").innerHTML = dates.map((d) => `<option ${d === sl.date ? "selected" : ""}>${esc(d)}</option>`).join("");
-  const fb = { ...sl.feedback, ...marks };
-  if (sl.error) { $("shortlist").innerHTML = `<div class="empty" style="color:var(--err)">${esc(sl.error)}</div>`; $("fb-actions").hidden = true; return; }
-  if (!sl.data) { $("shortlist").innerHTML = `<div class="empty">No shortlist for ${esc(sl.date)} yet.</div>`; $("fb-actions").hidden = true; return; }
+  const decisions = sl.feedback;
+  if (sl.error) { $("shortlist").innerHTML = `<div class="empty" style="color:var(--err)">${esc(sl.error)}</div>`; return; }
+  if (!sl.data) { $("shortlist").innerHTML = `<div class="empty">No shortlist for ${esc(sl.date)} yet.</div>`; return; }
   const items = sl.data.items || [];
   const summary = sl.data.summary ? `<p class="muted" style="margin-top:0">${esc(sl.data.summary)}</p>` : "";
   const cards = items.map((p) => {
-    const mark = fb[p.id] || {};
+    const decision = (decisions[p.id] || {}).decision;
     return `<div class="paper">
       <h3><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></h3>
       <div class="meta">${esc(p.authors || "")}${p.venue ? " · " + esc(p.venue) : ""}${p.date ? " · " + esc(p.date) : ""}</div>
@@ -282,19 +266,13 @@ function renderShortlist() {
       ${p.summary ? `<div>${esc(p.summary)}</div>` : ""}
       ${p.why ? `<div class="why">${esc(p.why)}</div>` : ""}
       <div class="fb" data-id="${esc(p.id)}" data-title="${esc(p.title)}">
-        <button data-verdict="useful" class="${mark.verdict === "useful" ? "on-useful" : ""}">Useful</button>
-        <button data-verdict="not useful" class="${mark.verdict === "not useful" ? "on-not" : ""}">Not useful</button>
-        <input data-comment placeholder="Why? (optional)" value="${esc(drafts[p.id] ?? mark.comment ?? "")}" style="flex:1;min-width:140px;padding:4px 8px">
-        ${mark.sent ? `<span class="small muted">sent</span>` : ""}
+        <button data-decision="accepted" class="${decision === "accepted" ? "on-useful" : ""}">Accept</button>
+        <button data-decision="declined" class="${decision === "declined" ? "on-not" : ""}">Decline</button>
       </div></div>`;
   }).join("");
   const considered = (sl.data.considered || []).length
     ? `<details class="small" style="margin-top:10px"><summary class="muted">${sl.data.considered.length} considered but left out</summary>${sl.data.considered.map((c) => `<div style="margin-top:6px"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a><div class="muted">${esc(c.reason || "")}</div></div>`).join("")}</details>` : "";
   $("shortlist").innerHTML = summary + (cards || `<div class="empty">The curator found nothing worth shortlisting.</div>`) + considered;
-  const unsent = Object.values(fb).filter((m) => !m.sent).length;
-  $("fb-actions").hidden = !items.length;
-  $("send-fb").disabled = !unsent;
-  $("fb-status").textContent = unsent ? `${unsent} unsent` : "";
 }
 
 function renderHeader() {
@@ -307,11 +285,6 @@ function renderHeader() {
 }
 
 function renderSide() {
-  // The front desk agent (board.toml `front_desk`) comes first and is picked by default.
-  const desk = state.board.front_desk;
-  const roles = Object.keys(state.roles).sort((a, b) => (b === desk) - (a === desk));
-  const current = $("to").value || (roles.includes(desk) ? desk : "");
-  $("to").innerHTML = roles.map((r) => `<option ${r === current ? "selected" : ""}>${esc(r)}</option>`).join("");
   $("human-notes").innerHTML = state.human_notes.length ? state.human_notes.map((n) => `
     <div class="note"><details><summary>${roleBadge(n.from)} <strong>${esc(n.subject || n.type)}</strong> <span class="meta">${hhmm(n.created)} · ${esc(n.created.slice(0, 10))}</span></summary><pre>${esc(n.body)}</pre></details></div>`).join("")
     : `<div class="empty">No notes.</div>`;
@@ -329,53 +302,21 @@ function renderSide() {
     : `<div class="empty">Empty. All notes handled.</div>`;
 }
 
-// Feedback: clicks are saved right away and sent to the curator in one note.
+// Accept / Decline is saved on click (click again to undo). The curator reads
+// the decisions on its next run; nothing is sent to an agent right away.
 $("shortlist").addEventListener("click", async (ev) => {
-  const btn = ev.target.closest("button[data-verdict]");
+  const btn = ev.target.closest("button[data-decision]");
   if (!btn) return;
   const box = btn.closest(".fb");
-  const id = box.dataset.id;
-  const comment = box.querySelector("[data-comment]").value;
-  const mark = { verdict: btn.dataset.verdict, title: box.dataset.title, comment };
-  delete drafts[id];
-  marks[id] = { ...mark, sent: false };
+  const current = (state.shortlist.feedback[box.dataset.id] || {}).decision;
+  const decision = current === btn.dataset.decision ? null : btn.dataset.decision;
+  state.shortlist.feedback[box.dataset.id] = { decision };
   renderShortlist();
-  await api("/api/feedback", { date: selectedDate, marks: { [id]: mark } });
+  try { await api("/api/feedback", { date: selectedDate, id: box.dataset.id, title: box.dataset.title, decision }); }
+  catch (e) { toast(e.message); refresh(); }
 });
-$("shortlist").addEventListener("change", async (ev) => {
-  if (!ev.target.matches("[data-comment]")) return;
-  const box = ev.target.closest(".fb");
-  const existing = { ...state.shortlist.feedback, ...marks }[box.dataset.id];
-  if (!existing?.verdict) return;
-  const mark = { verdict: existing.verdict, title: box.dataset.title, comment: ev.target.value };
-  marks[box.dataset.id] = { ...mark, sent: false };
-  await api("/api/feedback", { date: selectedDate, marks: { [box.dataset.id]: mark } });
-});
-$("shortlist").addEventListener("input", (ev) => {
-  if (ev.target.matches("[data-comment]")) drafts[ev.target.closest(".fb").dataset.id] = ev.target.value;
-});
-// Delay so a click that moved focus out still lands on the button it was aimed at.
-$("shortlist").addEventListener("focusout", () => setTimeout(() => {
-  if (state && !document.activeElement?.matches?.("#shortlist input")) renderShortlist();
-}, 250));
-$("send-fb").addEventListener("click", async () => {
-  try {
-    await api("/api/feedback", { date: selectedDate, send: true });
-    marks = {};
-    toast("Feedback sent to the curator");
-    refresh();
-  } catch (e) { toast(e.message); }
-});
-$("date").addEventListener("change", (ev) => { selectedDate = ev.target.value; marks = {}; drafts = {}; refresh(); });
+$("date").addEventListener("change", (ev) => { selectedDate = ev.target.value; refresh(); });
 
-$("note-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  try {
-    await api("/api/note", { to: $("to").value, type: $("type").value, subject: $("subject").value, body: $("body").value });
-    $("subject").value = ""; $("body").value = "";
-    toast(`Posted to ${$("to").value}`);
-  } catch (e) { toast(e.message); }
-});
 // Quick buttons come from [[button]] tables in board.toml.
 $("buttons").addEventListener("click", async (ev) => {
   const btn = ev.target.closest("[data-button]");

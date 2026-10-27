@@ -7,5 +7,12 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash({engine}/bin/post-note *)",
+      "Bash({engine}/bin/board status*)",
+      "Bash({engine}/bin/board up*)"
+    ]
   }
 }

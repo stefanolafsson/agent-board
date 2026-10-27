@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """SessionStart hook: tell every session what changed on the board recently.
 
+For sessions the human opens in a board folder (not agent runs), it also adds
+the board's LEAD.md: those sessions act as the board's lead.
+
 Whatever this prints is added to the session's context. It runs for agent
 runs (the watcher passes it via --settings) and for interactive sessions
 opened in the research folder (.claude/settings.json).
@@ -13,7 +16,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from boardlib import BOARD, CONFIG, HUMAN, HUMAN_DIR, INBOX, KNOWLEDGE, NAME, PROCESSING, SHORTLIST, read_activity, read_note  # noqa: E402
+from boardlib import BOARD, CONFIG, HUMAN, ROOT, HUMAN_DIR, INBOX, KNOWLEDGE, NAME, PROCESSING, SHORTLIST, read_activity, read_note  # noqa: E402
 
 RECENT_HOURS = 48
 
@@ -51,7 +54,7 @@ def main() -> None:
             files = f" → {', '.join(e['files'][:3])}" if e.get("files") else ""
             out.append(f"- {e['ts'][5:16]} {e.get('role')} [{e.get('event')}] {e.get('outcome', '')}{files}")
 
-    if CONFIG.get("shortlist"):
+    if "shortlist" in CONFIG:
         today = SHORTLIST / f"{date.today():%Y-%m-%d}.json"
         out.append(f"\n## Today's shortlist: {'shortlist/' + today.name if today.exists() else 'not written yet'}")
 
@@ -67,6 +70,11 @@ def main() -> None:
             out += lines
 
     out.append("\nCheck knowledge/ before redoing work another agent may already have done.")
+
+    # A session the human opened in the board folder is the board's lead.
+    lead = ROOT / "LEAD.md"
+    if not role and lead.exists():
+        out.append("\n---\n" + lead.read_text(encoding="utf-8").strip())
     print("\n".join(out))
 
 

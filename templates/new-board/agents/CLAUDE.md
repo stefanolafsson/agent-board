@@ -56,9 +56,9 @@ your session. Include links, ids and the facts it needs.
 ## Escalating
 
 If you're blocked, missing a permission, or something needs a decision you
-can't make, post a note to `lead` (type `escalation`) saying what happened and
-what you need. Then finish. Don't keep retrying. Failed runs are reported to
-the lead automatically.
+can't make, post a note to the human (type `escalation`) saying what happened
+and what you need. Then finish. Don't keep retrying. Failed runs are reported
+to the human automatically.
 
 ## Finishing
 
