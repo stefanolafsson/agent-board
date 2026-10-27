@@ -1,5 +1,6 @@
-Here's each example as a ready-to-paste ending for 
-"Set up an agent board here using https://github.com/stefanolafsson/agent-board. I want agents that …":
+Here are examples as ready-to-paste endings for the set-up prompt:
+
+> "Set up an agent board here using https://github.com/stefanolafsson/agent-board. I want agents that …"
 
 **Small businesses and shops**
 - **Online shop:** …read each day's new orders and reviews, spot recurring complaints, and send me a short note on what customers keep mentioning.
