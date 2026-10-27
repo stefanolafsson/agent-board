@@ -19,18 +19,21 @@ its own board folder.
 
 ## Start a board
 
-Clone this repo somewhere (once), make an empty folder for your board, open
-Claude in it (the desktop app's Code tab, or `claude` in a terminal), and say
-what you want, for example:
+Make an empty folder for your board, open Claude in it (the desktop app's Code
+tab, or `claude` in a terminal), and say what you want, for example:
 
-> Set up an agent board here with /path/to/agent-board. I want agents that find
-> new funding calls every week that fit my research, and help me draft
-> applications.
+> Set up an agent board here with https://github.com/stefanolafsson/agent-board.
+> I want agents that find new funding calls every week that fit my research,
+> and help me draft applications.
 
-Claude follows [SETUP.md](SETUP.md): it creates the board, asks what you need,
+That's all. Claude downloads the engine (once, to `~/agent-board`), then
+follows [SETUP.md](SETUP.md): it creates the board, asks what you need,
 proposes the agents and waits for your yes, builds them, tests them on
 something small, and shows you how to use the board. After that, any Claude
 session you open in the folder is the board's lead.
+
+> **Claude, if you were pointed here:** follow [SETUP.md](SETUP.md). It starts by
+> getting a local copy of this repo.
 
 ## Needs
 
@@ -42,7 +45,7 @@ Put the engine's `bin/` on your PATH, so `board`, `post-note` and `open-agent`
 work anywhere:
 
 ```bash
-echo 'export PATH="/path/to/agent-board/bin:$PATH"' >> ~/.zshrc
+echo 'export PATH="$HOME/agent-board/bin:$PATH"' >> ~/.zshrc   # or wherever your copy is
 ```
 
 ## Commands

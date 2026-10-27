@@ -1,13 +1,37 @@
 # Setting up a board (instructions for Claude)
 
 Someone has opened you in a folder and asked for an agent board, pointing you
-at this engine. In the steps below, `<engine>` is the folder this file is in,
-and `<folder>` is the folder they want the board in (usually your working
-directory). They may not be a programmer: talk plainly, ask one question at a
-time, and don't show them code unless they ask.
+at this engine (usually as https://github.com/stefanolafsson/agent-board). In
+the steps below, `<engine>` is the local copy of the engine, and `<folder>` is
+the folder they want the board in (usually your working directory). They may
+not be a programmer: talk plainly, ask one question at a time, and don't show
+them code unless they ask.
 
-Read `<engine>/README.md` first. It explains boards, `board.toml`, `role.json`,
-notes, and how the dispatcher fans out and joins.
+## 0. Get the engine
+
+The board needs a local copy of this repo. Use the first of these that applies:
+
+1. They gave a local path to it: use that.
+2. `~/agent-board/bin/board` exists: use `~/agent-board`, and update it quietly
+   with `git -C ~/agent-board pull --ff-only` (carry on if that fails).
+3. Otherwise, download it:
+
+   ```bash
+   git clone https://github.com/stefanolafsson/agent-board ~/agent-board
+   ```
+
+   If `git` isn't available (on a Mac it may ask to install developer tools),
+   download the zip instead:
+
+   ```bash
+   curl -L https://github.com/stefanolafsson/agent-board/archive/refs/heads/main.zip -o /tmp/agent-board.zip
+   unzip -q /tmp/agent-board.zip -d /tmp && mv /tmp/agent-board-main ~/agent-board
+   ```
+
+Tell them in one line where the engine went. Then read `<engine>/README.md`.
+It explains boards, `board.toml`, `role.json`, notes, and how the dispatcher fans
+out and joins. If you've been reading this file from the web, continue from the
+local copy.
 
 ## 1. Check the tools
 
