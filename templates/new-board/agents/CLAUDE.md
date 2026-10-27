@@ -53,6 +53,13 @@ your session. Include links, ids and the facts it needs.
 - Only write to the folders your role allows. If a tool is denied, work
   around it or report it in your outcome; don't keep retrying.
 
+## Escalating
+
+If you're blocked, missing a permission, or something needs a decision you
+can't make, post a note to `lead` (type `escalation`) saying what happened and
+what you need. Then finish. Don't keep retrying. Failed runs are reported to
+the lead automatically.
+
 ## Finishing
 
 End with the structured result: `outcome` (one line, under 120 characters,

@@ -4,6 +4,12 @@ name = "{name}"      # shown on the dashboard
 human = "{human}"    # notes addressed to this name go to board/{human}/
 port = {port}        # dashboard: http://127.0.0.1:{port}
 
+# The lead agent is your front desk: the default in the dashboard's "Post a
+# note" box, and the agent that hears about failed runs and blocked notes.
+front_desk = "lead"
+escalate_to = "lead"
+# escalate_denied = true   # also report runs where a tool was denied
+
 # Quick buttons on the dashboard: each posts one note.
 # [[button]]
 # label = "Ask the example agent"

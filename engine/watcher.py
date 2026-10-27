@@ -40,7 +40,7 @@ from watchdog.observers import Observer
 
 from boardlib import (  # noqa: E402
     AGENTS, ARCHIVE, BOARD, HUMAN, HUMAN_DIR, INBOX, LOGS, PROCESSING, ROOT,
-    Note, NoteError, child_env, current_session, list_roles, log_activity, now, read_activity, read_note,
+    CONFIG, Note, NoteError, child_env, post_note, current_session, list_roles, log_activity, now, read_activity, read_note,
     record_session_run,
 )
 
@@ -48,6 +48,8 @@ MAX_HOPS = int(os.environ.get("BOARD_MAX_HOPS", 6))
 MAX_RUNS_PER_CHAIN = int(os.environ.get("BOARD_MAX_RUNS_PER_CHAIN", 40))
 MAX_PARALLEL = int(os.environ.get("BOARD_MAX_PARALLEL", 4))
 HOOK = Path(__file__).resolve().parent / "session_start.py"
+ESCALATE_TO = CONFIG.get("escalate_to")              # agent told about failures (board.toml)
+ESCALATE_DENIED = CONFIG.get("escalate_denied", False)  # also tell it about denied tools?
 CLAUDE = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or str(Path.home() / ".local/bin/claude")
 
 RESULT_SCHEMA = {
@@ -149,14 +151,15 @@ class Dispatcher:
                 self._rescan_later(("invalid", path.name), 10)
                 return None
             dest = archive(path)
-            log_activity(role="dispatcher", event="invalid", trigger=path.name, outcome=str(exc), files=[rel(dest)])
+            escalate(log_activity(role="dispatcher", event="invalid", trigger=path.name, outcome=str(exc),
+                                  files=[rel(dest)]))
             say(f"invalid note {path.name}: {exc}")
             return None
 
     def _reject(self, note: Note, event: str, reason: str) -> None:
         dest = archive(note.path)
-        log_activity(role=note.to, event=event, chain=note.chain, hop=note.hop,
-                     trigger=f"{note.sender}:{note.type}", outcome=reason, files=[rel(dest)])
+        escalate(log_activity(role=note.to, event=event, chain=note.chain, hop=note.hop,
+                              trigger=f"{note.sender}:{note.type}", outcome=reason, files=[rel(dest)]))
         say(f"{event}: {note.path.name} ({reason})")
 
     def _rescan_later(self, key: tuple[str, str], delay: float) -> None:
@@ -204,6 +207,8 @@ class Dispatcher:
         entry = log_activity(role=role, run=run_id, chain=chain, hop=max(n.hop for n in notes), trigger=trigger,
                              duration_s=round(time.time() - started), notes=archived, **result)
         say(f"{entry['event']} {role}: {entry['outcome']}")
+        if entry["event"] == "error" or (ESCALATE_DENIED and entry.get("denied")):
+            escalate(entry)
         self._commit(f"[{role}] {entry['outcome']}"[:200])
         with self.lock:
             self.active[chain] -= 1
@@ -222,6 +227,34 @@ class Dispatcher:
         for path in PROCESSING.glob("*.md"):
             os.replace(path, INBOX / path.name)
             say(f"recovered {path.name}")
+
+
+def escalate(entry: dict) -> None:
+    """Post a note about a failed run, blocked chain or bad note to the escalation agent.
+
+    It starts a new chain, and nothing about the escalation agent itself or about
+    an escalation note is escalated, so escalations can't loop.
+    """
+    if not ESCALATE_TO or ESCALATE_TO not in list_roles() or entry.get("role") == ESCALATE_TO:
+        return
+    if "escalation" in (entry.get("trigger") or ""):
+        return
+    facts = [
+        f"- what happened: {entry['event']}",
+        f"- agent: {entry.get('role')}",
+        f"- triggered by: {entry.get('trigger')}",
+        f"- outcome: {entry.get('outcome')}",
+        f"- chain: {entry.get('chain', '-')}",
+    ]
+    if entry.get("denied"):
+        facts.append(f"- denied tools: {', '.join(entry['denied'])}")
+    if entry.get("run"):
+        facts.append(f"- raw output of the run: logs/runs/{entry['run']}.json")
+    facts += [f"- file: board/{f}" for f in entry.get("files", []) + entry.get("notes", [])]
+    body = "\n".join(["The watcher reports a problem on the board.", "", *facts, "",
+                      "Find out why, fix what you're allowed to fix, and tell the human if it needs a decision."])
+    post_note(Note(to=ESCALATE_TO, sender="dispatcher", type="escalation",
+                   subject=f"{entry['event']}: {entry.get('role')}: {str(entry.get('outcome', ''))[:70]}", body=body))
 
 
 def build_prompt(role: str, notes: list[Note], run_id: str) -> str:
@@ -250,14 +283,19 @@ def resident_args(role: str, session: dict) -> list[str]:
 
 
 def run_agent(role: str, cfg: dict, notes: list[Note], run_id: str) -> dict:
-    absolute = "/" + str(BOARD)  # permission rules use //path for absolute paths
-    allowed = [rule.replace("{board}", absolute) for rule in cfg.get("allow", [])]
+    # In role.json, {board} and {root} stand for the board/ folder and the whole board folder.
+    # Permission rules use //path for absolute paths.
+    def expand(text: str, rule: bool) -> str:
+        prefix = "/" if rule else ""
+        return text.replace("{board}", prefix + str(BOARD)).replace("{root}", prefix + str(ROOT))
+
+    allowed = [expand(rule, True) for rule in cfg.get("allow", [])]
     cmd = [
         CLAUDE, "-p",
         "--model", cfg.get("model", "sonnet"),
         "--tools", ",".join(cfg.get("tools", ["Read", "Glob", "Grep"])),
         "--allowedTools", ",".join(allowed),
-        "--add-dir", str(BOARD),
+        "--add-dir", str(BOARD), *(expand(d, False) for d in cfg.get("add_dirs", [])),
         "--output-format", "json",
         "--json-schema", json.dumps(RESULT_SCHEMA),
         "--max-budget-usd", str(cfg.get("max_budget_usd", 1.0)),

@@ -307,8 +307,10 @@ function renderHeader() {
 }
 
 function renderSide() {
-  const roles = Object.keys(state.roles);
-  const current = $("to").value;
+  // The front desk agent (board.toml `front_desk`) comes first and is picked by default.
+  const desk = state.board.front_desk;
+  const roles = Object.keys(state.roles).sort((a, b) => (b === desk) - (a === desk));
+  const current = $("to").value || (roles.includes(desk) ? desk : "");
   $("to").innerHTML = roles.map((r) => `<option ${r === current ? "selected" : ""}>${esc(r)}</option>`).join("");
   $("human-notes").innerHTML = state.human_notes.length ? state.human_notes.map((n) => `
     <div class="note"><details><summary>${roleBadge(n.from)} <strong>${esc(n.subject || n.type)}</strong> <span class="meta">${hhmm(n.created)} · ${esc(n.created.slice(0, 10))}</span></summary><pre>${esc(n.body)}</pre></details></div>`).join("")

@@ -74,7 +74,7 @@ def state(query: dict) -> dict:
         "processing": note_list(PROCESSING, 50),
         "human_notes": note_list(HUMAN_DIR, 20, with_body=True),
         "shortlist": shortlist(query.get("date", [None])[0]) if SHORTLIST_CONFIG else None,
-        "board": {"name": NAME, "human": HUMAN},
+        "board": {"name": NAME, "human": HUMAN, "front_desk": CONFIG.get("front_desk")},
         "buttons": [{"label": b["label"], "title": b.get("title", ""), "confirm": b.get("confirm", "")}
                     for b in BUTTONS],
     }

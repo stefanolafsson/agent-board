@@ -116,6 +116,19 @@ def cmd_status(args) -> None:
     pid = running_pid()
     print(f"{boardlib.NAME}  ({boardlib.ROOT})")
     print(f"  {'running, pid ' + str(pid) if pid else 'not running'} · dashboard http://127.0.0.1:{boardlib.PORT}")
+    today = [e for e in boardlib.read_activity() if e.get("ts", "").startswith(f"{date.today():%Y-%m-%d}")]
+    runs = [e for e in today if e.get("run") and e.get("event") in ("done", "error")]
+    problems = [e for e in today if e.get("event") in ("error", "blocked", "unrouted", "invalid")]
+    cost = sum(e.get("cost_usd") or 0 for e in runs)
+    print(f"  today: {len(runs)} runs, {len(problems)} problems, ${cost:.2f}")
+    for e in problems[-5:]:
+        print(f"    {e['ts'][11:16]} {e.get('event')} {e.get('role')}: {str(e.get('outcome', ''))[:80]}")
+    waiting = len(list(boardlib.INBOX.glob("*.md"))) + len(list(boardlib.PROCESSING.glob("*.md")))
+    proposals = [p.name for p in (boardlib.BOARD / "proposals").glob("*.md")
+                 if "Status: proposed" in p.read_text(encoding="utf-8")]
+    print(f"  waiting: {waiting} notes · open proposals: {len(proposals)}")
+    for name in proposals:
+        print(f"    {name}")
     sessions = boardlib.load_sessions()
     for role, cfg in boardlib.list_roles().items():
         extra = ""
@@ -162,8 +175,10 @@ def cmd_init(args) -> None:
     toml = (root / "board.toml").read_text(encoding="utf-8")
     toml = toml.replace("{name}", args.name or root.name).replace("{human}", args.human).replace("{port}", str(args.port))
     (root / "board.toml").write_text(toml, encoding="utf-8")
-    settings = (root / ".claude" / "settings.json").read_text(encoding="utf-8")
-    (root / ".claude" / "settings.json").write_text(settings.replace("{engine}", str(ENGINE)), encoding="utf-8")
+    # Files that need to know where the engine and the board are.
+    for path in [root / ".claude" / "settings.json", *root.glob("agents/*/CLAUDE.md")]:
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace("{engine}", str(ENGINE)).replace("{root}", str(root)), encoding="utf-8")
     if not (root / ".git").exists():
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root)
     print(f"Created a board in {root}\nNext: add agents in agents/, then `board up {root}`.")
