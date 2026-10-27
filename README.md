@@ -17,8 +17,21 @@ its own board folder.
                                                   └──► board/<human>/
 ```
 
-Boards that use it: `~/Documents/github/research` (literature pipeline) and
-`~/Documents/github/hraunbjorg-board` (workshop demo).
+## Start a board
+
+Make an empty folder, open Claude in it (the desktop app's Code tab, or
+`claude` in a terminal), and say what you want, for example:
+
+> Set up an agent board here with ~/Documents/github/agent-board. I want agents
+> that find new funding calls every week that fit my research, and help me draft
+> applications.
+
+Claude follows [SETUP.md](SETUP.md): it creates the board, asks what you need,
+proposes the agents and waits for your yes, builds them, tests them on
+something small, and shows you how to use the board. After that, any Claude
+session you open in the folder is the board's lead.
+
+Boards that use the engine: `~/Documents/github/hraunbjorg-board` (workshop demo).
 
 ## Needs
 
@@ -36,7 +49,7 @@ echo 'export PATH="$HOME/Documents/github/agent-board/bin:$PATH"' >> ~/.zshrc
 ## Commands
 
 ```bash
-board init ~/Documents/github/my-board --name "My board" --port 8790
+board init [FOLDER] [--name "My board"]   # empty folder (default: here) -> board
 board up [BOARD]       # start watcher, dashboard and services in the background
 board down [BOARD]     # stop them
 board status [BOARD]   # running? today's runs, problems, cost, what's waiting, agents
@@ -56,16 +69,18 @@ open-agent <role>        # open a resident agent's session in the Claude app
 
 ```
 my-board/
+  CLAUDE.md           makes a Claude session opened here the board's lead
   board.toml          name, human, port, buttons, morning note, services, shortlist
   agents/CLAUDE.md    rules every agent shares (note format, fan-out rule, guards)
   agents/<role>/      CLAUDE.md (instructions) + role.json (model, tools, permissions)
   bin/                the board's own scripts; agents can run them by name
   board/              inbox, processing, archive, <human>/, knowledge/, state/, activity.log
-  .env                secrets for agents and services (not in git)
-  logs/               watcher log and raw output of each run (not in git)
+  .env                secrets for agents and services (ignored by git, if you use it)
+  logs/               watcher log and raw output of each run (ignored by git)
 ```
 
-`board init` creates this from `templates/new-board/`, with an example agent.
+`board init` creates this from `templates/new-board/`, with an example agent,
+and picks a free dashboard port.
 
 ### board.toml
 
@@ -120,10 +135,11 @@ name (`mcp__...`) in `allow`.
 ## Talking to a board: the lead is your Claude session
 
 Open Claude (the desktop app's Code tab, or `claude` in a terminal) in a board
-folder, and that session is the board's lead. The SessionStart hook gives it
-what changed on the board, your notes, and the board's `LEAD.md`. That file tells
-it how to address agents (`post-note`), check status (`board status`), explain
-failures, and change agents only after you agree. Agent runs never see `LEAD.md`.
+folder, and that session is the board's lead. The board's `CLAUDE.md` tells it
+to check `board status` and your notes first, then how to address agents
+(`post-note`), explain failures, and change agents only after you agree. Agent
+runs also see that file (Claude Code reads `CLAUDE.md` in parent folders), so it
+opens by telling them to skip it.
 
 Failed runs, blocked chains, notes to unknown agents and broken notes are
 reported to you as `escalation` notes in `board/<human>/`, so you see them on
@@ -168,10 +184,11 @@ check blocks quoted arguments that contain a line starting with `#`.
   are `unrouted`; files without a valid header are `invalid`.
 
 Every run is logged to `board/activity.log` (time, role, trigger, outcome, files,
-cost, denied tools), and the board folder is committed to git after each run.
-Each run starts with a SessionStart hook (`engine/session_start.py`) that tells
-the agent what changed on the board recently. Boards also wire it into
-`.claude/settings.json` for interactive sessions.
+cost, denied tools). If the board folder is a git repo (optional; `board init`
+doesn't create one), `board/` is committed after each run.
+Each run starts with a SessionStart hook (`engine/session_start.py`, passed by
+the watcher) that tells the agent what changed on the board recently. Boards
+need no `.claude/settings.json`.
 
 ## Starting boards automatically
 
@@ -191,6 +208,7 @@ closed happens on next launch.
 | `engine/dashboard.py`, `dashboard.html` | The dashboard (standard library only). |
 | `engine/session_start.py` | The SessionStart hook. |
 | `templates/new-board/` | What `board init` copies. |
+| `SETUP.md` | The steps Claude follows to set up a new board with someone. |
 
 The minimal teaching version for workshop participants, which works on Mac
 and Windows, is a separate repo: `agent-board-kit`.

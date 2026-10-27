@@ -9,7 +9,7 @@ Agents that work together through notes. Run with the agent-board engine:
 - `agents/<name>/`: one folder per agent, with `CLAUDE.md` (instructions) and
   `role.json` (model, tools, permissions, cost cap).
 - `agents/CLAUDE.md`: rules every agent shares.
-- `LEAD.md`: open Claude (app or CLI) in this folder and that session is the
+- `CLAUDE.md`: open Claude (app or CLI) in this folder and that session is the
   board's lead: you tell it what you want, and it addresses the agents, checks
   status and changes agents with your OK.
 - `board/`: the notes, knowledge and activity log.

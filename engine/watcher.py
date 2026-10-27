@@ -16,7 +16,7 @@ with it. It routes and splits work but never does the work itself:
                          MAX_RUNS_PER_CHAIN runs, are archived as blocked
 
 Every start and finish goes to board/activity.log, and after each run the
-board folder is committed to git.
+board folder is committed to git, if it's a git repo.
 
 Started by `board up` or `board run` (see bin/board).
 """

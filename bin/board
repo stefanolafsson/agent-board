@@ -5,7 +5,7 @@
 # ///
 """Run boards of collaborating Claude Code agents.
 
-    board init ~/somewhere/my-board --name "My board"   # create a new board
+    board init [FOLDER] [--name "My board"]   # turn an empty folder (default: this one) into a board
     board up [BOARD]       # start watcher, dashboard and services in the background
     board down [BOARD]     # stop them
     board status [BOARD]   # is it running? which agents and sessions?
@@ -161,23 +161,36 @@ def cmd_morning(args) -> None:
     print(f"Posted {path.name}")
 
 
+def free_port(start: int = 8790) -> int:
+    """The first port from `start` that nothing is listening on."""
+    import socket
+    for port in range(start, start + 100):
+        with socket.socket() as sock:
+            if sock.connect_ex(("127.0.0.1", port)) != 0:
+                return port
+    return start
+
+
 def cmd_init(args) -> None:
     root = Path(args.board or ".").expanduser().resolve()
     if (root / "board.toml").exists():
         sys.exit(f"{root} is already a board.")
-    if root.exists() and any(p for p in root.iterdir() if p.name != ".git"):
-        sys.exit(f"{root} isn't empty. Pick a new folder.")
+    # A brand-new folder may already hold git or Claude's own files; anything else means it's in use.
+    clutter = [p.name for p in root.iterdir() if p.name not in (".git", ".claude", ".DS_Store")] if root.exists() else []
+    if clutter:
+        sys.exit(f"{root} isn't empty ({', '.join(sorted(clutter)[:5])}). Use an empty folder.")
     shutil.copytree(TEMPLATE, root, dirs_exist_ok=True)
+    name = args.name or root.name.replace("-", " ").replace("_", " ").capitalize()
+    port = args.port or free_port()
     toml = (root / "board.toml").read_text(encoding="utf-8")
-    toml = toml.replace("{name}", args.name or root.name).replace("{human}", args.human).replace("{port}", str(args.port))
+    toml = toml.replace("{name}", name).replace("{human}", args.human).replace("{port}", str(port))
     (root / "board.toml").write_text(toml, encoding="utf-8")
     # Files that need to know where the engine and the board are.
-    for path in [root / ".claude" / "settings.json", root / "LEAD.md", *root.glob("agents/*/CLAUDE.md")]:
+    for path in [root / "CLAUDE.md", *root.glob("agents/*/CLAUDE.md")]:
         text = path.read_text(encoding="utf-8")
         path.write_text(text.replace("{engine}", str(ENGINE)).replace("{root}", str(root)), encoding="utf-8")
-    if not (root / ".git").exists():
-        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root)
-    print(f"Created a board in {root}\nNext: add agents in agents/, then `board up {root}`.")
+    print(f"Created the board \"{name}\" in {root} (dashboard port {port}).")
+    print(f"Next: describe your agents to Claude in this folder, or see {ENGINE / 'SETUP.md'}.")
 
 
 def main() -> None:
@@ -189,7 +202,7 @@ def main() -> None:
     init.add_argument("board", nargs="?")
     init.add_argument("--name")
     init.add_argument("--human", default=os.environ.get("USER", "human"))
-    init.add_argument("--port", type=int, default=8790)
+    init.add_argument("--port", type=int, help="dashboard port (default: the first free one from 8790)")
     args = parser.parse_args()
 
     if args.command == "init":
