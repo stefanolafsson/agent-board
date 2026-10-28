@@ -117,8 +117,8 @@ def cmd_status(args) -> None:
     print(f"{boardlib.NAME}  ({boardlib.ROOT})")
     print(f"  {'running, pid ' + str(pid) if pid else 'not running'} · dashboard http://127.0.0.1:{boardlib.PORT}")
     today = [e for e in boardlib.read_activity() if e.get("ts", "").startswith(f"{date.today():%Y-%m-%d}")]
-    runs = [e for e in today if e.get("run") and e.get("event") in ("done", "error")]
-    problems = [e for e in today if e.get("event") in ("error", "blocked", "unrouted", "invalid")]
+    runs = [e for e in today if e.get("run") and e.get("event") in ("done", "error", "stuck")]
+    problems = [e for e in today if e.get("event") in ("error", "stuck", "blocked", "unrouted", "invalid")]
     cost = sum(e.get("cost_usd") or 0 for e in runs)
     print(f"  today: {len(runs)} runs, {len(problems)} problems, ${cost:.2f}")
     for e in problems[-5:]:

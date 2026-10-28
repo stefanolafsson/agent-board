@@ -40,7 +40,7 @@ from watchdog.observers import Observer
 
 from boardlib import (  # noqa: E402
     AGENTS, ARCHIVE, BOARD, HUMAN, HUMAN_DIR, INBOX, LOGS, PROCESSING, ROOT,
-    CONFIG, Note, NoteError, child_env, post_note, current_session, list_roles, log_activity, now, read_activity, read_note,
+    CONFIG, ENGINE, Note, NoteError, child_env, post_note, current_session, list_roles, log_activity, now, read_activity, read_note,
     record_session_run,
 )
 
@@ -203,11 +203,16 @@ class Dispatcher:
             result = run_agent(role, cfg, notes, run_id)
         except Exception as exc:  # never let one run take the watcher down
             result = {"event": "error", "outcome": f"watcher error: {exc}", "files": []}
+        # Tools were denied and nothing came out of the run: the chain has silently stopped.
+        if result.get("event") == "done" and result.get("denied") and not result.get("files") \
+                and not notes_posted(role, chain, started):
+            result["event"] = "stuck"
+            result["outcome"] = f"stuck (tools denied, nothing produced): {result['outcome']}"[:300]
         archived = [rel(archive(n.path)) for n in notes if n.path.exists()]
         entry = log_activity(role=role, run=run_id, chain=chain, hop=max(n.hop for n in notes), trigger=trigger,
                              duration_s=round(time.time() - started), notes=archived, **result)
         say(f"{entry['event']} {role}: {entry['outcome']}")
-        if entry["event"] == "error" or (ESCALATE_DENIED and entry.get("denied")):
+        if entry["event"] in ("error", "stuck") or (ESCALATE_DENIED and entry.get("denied")):
             escalate(entry)
         self._commit(f"[{role}] {entry['outcome']}"[:200])
         with self.lock:
@@ -227,6 +232,18 @@ class Dispatcher:
         for path in PROCESSING.glob("*.md"):
             os.replace(path, INBOX / path.name)
             say(f"recovered {path.name}")
+
+
+def notes_posted(role: str, chain: str, since: float) -> bool:
+    """Did this role post any note in this chain since `since`?"""
+    folders = (INBOX, PROCESSING, HUMAN_DIR, ARCHIVE / f"{date.today():%Y-%m-%d}")
+    for path in (p for folder in folders for p in folder.glob(f"*-{role}-to-*.md")):
+        try:
+            if path.stat().st_mtime >= since and read_note(path).chain == chain:
+                return True
+        except (OSError, NoteError):
+            continue
+    return False
 
 
 def escalate(entry: dict) -> None:
@@ -292,6 +309,11 @@ def run_agent(role: str, cfg: dict, notes: list[Note], run_id: str) -> dict:
         return text.replace("{board}", prefix + str(BOARD)).replace("{root}", prefix + str(ROOT))
 
     allowed = [expand(rule, True) for rule in cfg.get("allow", [])]
+    # A Write(...) path rule doesn't let headless runs write; Edit(...) covers both tools.
+    allowed += [f"Edit({rule[6:]}" for rule in allowed if rule.startswith("Write(")]
+    # Agents sometimes call post-note by its full path; allow that form as well.
+    if "Bash(post-note *)" in allowed:
+        allowed.append(f"Bash({ENGINE / 'bin' / 'post-note'} *)")
     cmd = [
         CLAUDE, "-p",
         "--model", cfg.get("model", "sonnet"),

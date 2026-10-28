@@ -31,6 +31,13 @@ EOF
 Don't use `--body "..."` for multi-line text: a quoted argument with a line
 starting with `#` is blocked by the permission check.
 
+Run it by its bare name, `post-note`, as a command of its own: no path in
+front of it, no `cd`, and nothing chained with `;` or `&&`. Anything else is
+denied, since nobody is there to approve it.
+
+Write board files with the Write tool, not with Bash (`cat >`, `mkdir`). Write
+creates missing folders, and Bash file writes are denied.
+
 `from`, `chain` and `hop` are filled in for you. Write each note so that it
 stands alone: the next agent sees only your note and the knowledge folder, not
 your session. Include links, ids and the facts it needs.

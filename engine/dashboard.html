@@ -52,7 +52,7 @@
   .event time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
   .event .what { min-width: 0; overflow-wrap: anywhere; }
   .status { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; margin-left: 4px; }
-  .status.running { color: var(--run); } .status.done { color: var(--ok); } .status.error, .status.blocked, .status.unrouted, .status.invalid { color: var(--err); } .status.delivered { color: var(--warn); }
+  .status.running { color: var(--run); } .status.done { color: var(--ok); } .status.error, .status.stuck, .status.blocked, .status.unrouted, .status.invalid { color: var(--err); } .status.delivered { color: var(--warn); }
   .status.running::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 5px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .meta { font-size: 12px; color: var(--muted); }

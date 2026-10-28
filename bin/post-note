@@ -7,7 +7,7 @@
 Inside an agent run, `from`, `chain` and `hop` are filled in from the
 environment the watcher sets (BOARD_ROLE, BOARD_CHAIN, BOARD_HOP), so the
 loop guard can count hand-offs. Outside a run, the note starts a new chain
-from Stefán.
+from the human named in board.toml.
 """
 
 import argparse

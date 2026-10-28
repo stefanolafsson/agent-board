@@ -44,7 +44,7 @@ def main() -> None:
         out.append(f"\n## Knowledge changed in the last {RECENT_HOURS}h")
         out += [f"- knowledge/{p.relative_to(KNOWLEDGE)} ({time.strftime('%a %H:%M', time.localtime(p.stat().st_mtime))})" for p in changed[:10]]
 
-    activity = [e for e in read_activity(60) if e.get("event") in ("done", "error", "blocked", "delivered")][-12:]
+    activity = [e for e in read_activity(60) if e.get("event") in ("done", "error", "stuck", "blocked", "delivered")][-12:]
     if activity:
         out.append("\n## Latest agent runs")
         for e in activity:

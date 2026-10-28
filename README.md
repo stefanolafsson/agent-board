@@ -129,7 +129,9 @@ requires_env = "SOME_MCP_URL"            # skipped unless set (e.g. in .env)
 
 `add_dirs` gives the agent extra folders (`{root}` is the whole board folder). `tools` is what exists in the run, and `allow` is what may run without asking (anything
 else is denied, since nobody is there to approve it). In `allow`, `{board}`
-becomes the board folder's absolute path, e.g. `Write({board}/knowledge/**)`.
+becomes the board folder's absolute path, e.g. `Edit({board}/knowledge/**)`. Path rules
+for writing files use `Edit(...)`: it covers both the Write and Edit tools, while a
+`Write(...)` rule doesn't let headless runs write (the watcher adds the `Edit` form for you).
 Agents that use MCP connectors need `ToolSearch` in `tools` and each tool's full
 name (`mcp__...`) in `allow`.
 

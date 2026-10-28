@@ -86,7 +86,9 @@ Don't build until they agree.
   `agents/<name>/role.json`. Copy the example agent's format. Give each agent only
   the tools it needs:
   - posting notes needs `Bash` in `tools` and `Bash(post-note *)` in `allow`;
-  - writing files needs `Write`/`Edit` plus rules like `Write({board}/knowledge/**)`;
+  - writing files needs `Write`/`Edit` in `tools` plus `Edit(...)` path rules, like
+    `Edit({board}/knowledge/**)`. Use `Edit(...)`, not `Write(...)`: an Edit rule covers
+    the Write tool too, and a Write rule alone is denied in headless runs;
   - connectors need `ToolSearch` in `tools` and each tool's exact `mcp__...` name in
     `allow`. Find the names by asking a headless run, or from the connector's tool list.
 
@@ -112,9 +114,14 @@ Don't build until they agree.
    `<folder>`). Keep it cheap: ask for one or two items, not twenty. Each run uses
    roughly $0.05 to $0.50 of their Claude plan; say so before running a whole chain.
 3. Follow it in `logs/board.log`, or with `<engine>/bin/board status`. Then read the
-   results and `board/activity.log`. A "denied" tool means `role.json` needs a
-   rule, or the instructions asked for something they shouldn't.
-4. Fix and run again until it does what they asked. Then test the whole chain once.
+   results and `board/activity.log`.
+4. **Before trusting an outcome, check `permission_denials`** in the run's raw output,
+   `logs/runs/<run>.json`. An agent can report success even though its tools were
+   denied. A denial means `role.json` needs a rule, or the instructions asked for
+   something they shouldn't (a full path to `post-note`, chained commands, or file
+   writes through Bash). The watcher marks a run **stuck** when tools were denied and
+   it produced nothing.
+5. Fix and run again until it does what they asked. Then test the whole chain once.
 
 ## 7. Hand over
 
