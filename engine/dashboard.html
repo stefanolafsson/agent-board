@@ -82,6 +82,16 @@
   .note:first-of-type { border-top: 0; }
   .note pre, .modal pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 6px 0 0; }
   details summary { cursor: pointer; }
+  .md { margin-top: 6px; overflow-wrap: anywhere; }
+  .md > :first-child { margin-top: 0; }
+  .md h1, .md h2, .md h3, .md h4 { display: block; line-height: 1.3; margin: 14px 0 4px; color: var(--ink); text-transform: none; letter-spacing: 0; font-weight: 650; }
+  .md h1 { font-size: 17px; } .md h2 { font-size: 15px; } .md h3, .md h4 { font-size: 14px; }
+  .md p, .md ul, .md ol, .md blockquote { margin: 6px 0; }
+  .md ul, .md ol { padding-left: 20px; }
+  .md li { margin: 3px 0; }
+  .md blockquote { padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+  .md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+  .md code { background: var(--chip); padding: 0 4px; border-radius: 4px; font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
   select.date { width: auto; padding: 2px 6px; font-size: 12px; }
   .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.show { opacity: 1; }
@@ -130,13 +140,72 @@
   </div>
 </main>
 
-<div class="modal-bg" id="modal-bg"><div class="modal"><div class="actions" style="margin:0 0 6px"><strong id="modal-title"></strong><span class="spacer" style="flex:1"></span><button id="modal-close">Close</button></div><pre id="modal-text"></pre></div></div>
+<div class="modal-bg" id="modal-bg"><div class="modal"><div class="actions" style="margin:0 0 6px"><strong id="modal-title"></strong><span class="spacer" style="flex:1"></span><button id="modal-close">Close</button></div><div id="modal-text"></div></div></div>
 <div class="toast" id="toast"></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const hhmm = (ts) => (ts || "").slice(11, 16);
+
+// Notes are markdown. A small renderer for what agents write: headings, lists,
+// quotes, code, links and emphasis. Text is escaped first, so notes can't inject HTML.
+function inlineMd(text) {
+  const codes = [];
+  let s = esc(text).replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) =>
+      /^(https?:|mailto:)/i.test(url) ? `<a href="${url}" target="_blank" rel="noopener">${label}</a>` : m)
+    .replace(/(^|[\s(])(https?:\/\/[^\s<]*[^\s<.,;:!?)])/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
+    .replace(/(^|[^\w])_([^_\s][^_]*)_(?![\w])/g, "$1<em>$2</em>");
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+}
+
+function md(src) {
+  const out = [];
+  let para = [], list = null, quote = [];
+  const flush = () => {
+    if (para.length) out.push(`<p>${inlineMd(para.join(" "))}</p>`);
+    if (list) out.push(`<${list.tag}>${list.items.map((i) => `<li>${inlineMd(i)}</li>`).join("")}</${list.tag}>`);
+    if (quote.length) out.push(`<blockquote>${quote.map(inlineMd).join("<br>")}</blockquote>`);
+    para = []; list = null; quote = [];
+  };
+  const lines = String(src ?? "").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let m;
+    if (/^\s*```/.test(line)) {
+      flush();
+      const code = [];
+      while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i]);
+      out.push(`<pre>${esc(code.join("\n"))}</pre>`);
+    } else if (!line.trim()) {
+      flush();
+    } else if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+      flush();
+      const n = Math.min(m[1].length, 4);
+      out.push(`<h${n}>${inlineMd(m[2])}</h${n}>`);
+    } else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      flush();
+      out.push("<hr>");
+    } else if ((m = line.match(/^>\s?(.*)$/))) {
+      if (!quote.length) flush();
+      quote.push(m[1]);
+    } else if ((m = line.match(/^\s*([-*+]|\d+[.)])\s+(.*)$/))) {
+      const tag = /\d/.test(m[1]) ? "ol" : "ul";
+      if (!list || list.tag !== tag) { flush(); list = { tag, items: [] }; }
+      list.items.push(m[2]);
+    } else if (list && /^\s/.test(line)) {
+      list.items[list.items.length - 1] += " " + line.trim();
+    } else {
+      if (list || quote.length) flush();
+      para.push(line.trim());
+    }
+  }
+  flush();
+  return out.join("");
+}
 let state = null, selectedDate = null;
 const shown = new Set();  // timeline items already drawn, so only new ones animate
 
@@ -286,7 +355,7 @@ function renderHeader() {
 
 function renderSide() {
   $("human-notes").innerHTML = state.human_notes.length ? state.human_notes.map((n) => `
-    <div class="note"><details><summary>${roleBadge(n.from)} <strong>${esc(n.subject || n.type)}</strong> <span class="meta">${hhmm(n.created)} · ${esc(n.created.slice(0, 10))}</span></summary><pre>${esc(n.body)}</pre></details></div>`).join("")
+    <div class="note"><details><summary>${roleBadge(n.from)} <strong>${esc(n.subject || n.type)}</strong> <span class="meta">${hhmm(n.created)} · ${esc(n.created.slice(0, 10))}</span></summary><div class="md">${md(n.body)}</div></details></div>`).join("")
     : `<div class="empty">No notes.</div>`;
   const resident = Object.entries(state.resident || {});
   $("resident-card").hidden = !resident.length;
@@ -339,7 +408,7 @@ document.addEventListener("click", async (ev) => {
   if (!link) return;
   try {
     const f = await api(`/api/file?path=${encodeURIComponent(link.dataset.file)}`);
-    $("modal-title").textContent = f.path; $("modal-text").textContent = f.text; $("modal-bg").classList.add("show");
+    $("modal-title").textContent = f.path; $("modal-text").innerHTML = /\.md$/i.test(f.path) ? `<div class="md">${md(f.text)}</div>` : `<pre>${esc(f.text)}</pre>`; $("modal-bg").classList.add("show");
   } catch (e) { toast(`Can't open ${link.dataset.file}`); }
 });
 $("modal-close").addEventListener("click", () => $("modal-bg").classList.remove("show"));
