@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["watchdog>=4"]
+# dependencies = ["watchdog==6.0.0"]
 # ///
 """Run boards of collaborating Claude Code agents.
 
@@ -33,7 +33,10 @@ TEMPLATE = ENGINE / "templates" / "new-board"
 
 
 def use_board(path: str | None) -> None:
-    """Point the engine at a board, load its .env, and import boardlib."""
+    """Point the engine at a board and import boardlib.
+
+    The board's .env stays out of the environment: services and agents get only the
+    variables they name (see boardlib.named_env)."""
     if path:
         root = Path(path).expanduser().resolve()
         if not (root / "board.toml").exists():
@@ -41,12 +44,6 @@ def use_board(path: str | None) -> None:
         os.environ["BOARD_ROOT"] = str(root)
     sys.path.insert(0, str(ENGINE / "engine"))
     import boardlib
-    env_file = boardlib.ROOT / ".env"
-    if env_file.exists():  # secrets for agents and services, e.g. API keys or an MCP URL
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                key, value = line.split("=", 1)
-                os.environ.setdefault(key.strip(), value.strip())
     os.environ["BOARD_ROOT"] = str(boardlib.ROOT)
 
 
@@ -69,11 +66,12 @@ def cmd_run(args) -> None:
     children = [subprocess.Popen([sys.executable, str(ENGINE / "engine" / "dashboard.py")], env=boardlib.child_env())]
     for service in boardlib.CONFIG.get("service", []):
         needs = service.get("requires_env")
-        if needs and not os.environ.get(needs):
+        env = boardlib.named_env(list(service.get("env", [])) + ([needs] if needs else []))
+        if needs and needs not in env:
             print(f"skipping {service.get('name', service['command'])}: {needs} is not set", flush=True)
             continue
         command = [sys.executable if part == "python3" else part for part in service["command"]]
-        children.append(subprocess.Popen(command, cwd=boardlib.ROOT, env=boardlib.child_env()))
+        children.append(subprocess.Popen(command, cwd=boardlib.ROOT, env=boardlib.child_env(**env)))
     try:
         import watcher
         watcher.main()
@@ -118,9 +116,10 @@ def cmd_status(args) -> None:
     print(f"  {'running, pid ' + str(pid) if pid else 'not running'} · dashboard http://127.0.0.1:{boardlib.PORT}")
     today = [e for e in boardlib.read_activity() if e.get("ts", "").startswith(f"{date.today():%Y-%m-%d}")]
     runs = [e for e in today if e.get("run") and e.get("event") in ("done", "error", "stuck")]
-    problems = [e for e in today if e.get("event") in ("error", "stuck", "blocked", "unrouted", "invalid")]
+    problems = [e for e in today if e.get("event") in ("error", "stuck", "blocked", "unrouted", "invalid", "paused")]
     cost = sum(e.get("cost_usd") or 0 for e in runs)
-    print(f"  today: {len(runs)} runs, {len(problems)} problems, ${cost:.2f}")
+    budget = float(boardlib.CONFIG.get("daily_budget_usd", 10))
+    print(f"  today: {len(runs)} runs, {len(problems)} problems, ${cost:.2f} of ${budget:.2f} daily budget")
     for e in problems[-5:]:
         print(f"    {e['ts'][11:16]} {e.get('event')} {e.get('role')}: {str(e.get('outcome', ''))[:80]}")
     waiting = len(list(boardlib.INBOX.glob("*.md"))) + len(list(boardlib.PROCESSING.glob("*.md")))

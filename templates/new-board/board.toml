@@ -10,6 +10,10 @@ port = {port}        # dashboard: http://127.0.0.1:{port}
 # escalate_to = "some-agent"
 # escalate_denied = true
 
+# Most the agents may spend in a day (default 10). Runs that would go over
+# wait in the inbox until the next day, and you get a note.
+# daily_budget_usd = 10
+
 # Quick buttons on the dashboard: each posts one note.
 # [[button]]
 # label = "Ask the example agent"

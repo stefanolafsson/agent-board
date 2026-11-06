@@ -12,8 +12,12 @@ them code unless they ask.
 The board needs a local copy of this repo. Use the first of these that applies:
 
 1. They gave a local path to it: use that.
-2. `~/agent-board/bin/board` exists: use `~/agent-board`, and update it quietly
-   with `git -C ~/agent-board pull --ff-only` (carry on if that fails).
+2. `~/agent-board/bin/board` exists: use `~/agent-board`. Check whether it's
+   behind with `git -C ~/agent-board fetch -q` and
+   `git -C ~/agent-board log --oneline HEAD..origin/main`. If there are new
+   commits, tell them in a line and ask before updating
+   (`git -C ~/agent-board pull --ff-only`): the engine runs with their
+   permissions, so don't change it without a yes.
 3. Otherwise, download it:
 
    ```bash
@@ -21,11 +25,11 @@ The board needs a local copy of this repo. Use the first of these that applies:
    ```
 
    If `git` isn't available (on a Mac it may ask to install developer tools),
-   download the zip instead:
+   download the zip into a fresh private folder instead (never a fixed path in
+   `/tmp`, where another user could plant files):
 
    ```bash
-   curl -L https://github.com/stefanolafsson/agent-board/archive/refs/heads/main.zip -o /tmp/agent-board.zip
-   unzip -q /tmp/agent-board.zip -d /tmp && mv /tmp/agent-board-main ~/agent-board
+   d=$(mktemp -d) && curl -fsSL https://github.com/stefanolafsson/agent-board/archive/refs/heads/main.zip -o "$d/engine.zip" && unzip -q "$d/engine.zip" -d "$d" && test ! -e ~/agent-board && mv "$d/agent-board-main" ~/agent-board && rm -rf "$d"
    ```
 
 Tell them in one line where the engine went. Then read `<engine>/README.md`.
@@ -85,7 +89,21 @@ Don't build until they agree.
   it does, which note or file it produces, and its permissions) and
   `agents/<name>/role.json`. Copy the example agent's format. Give each agent only
   the tools it needs:
-  - posting notes needs `Bash` in `tools` and `Bash(post-note *)` in `allow`;
+  - reading needs `Read`/`Glob`/`Grep` in `tools` only: agents can read their own
+    folder and `board/` without a rule. For anything else, add the folder to
+    `add_dirs`. The engine ignores a bare `Read` (or `Glob`/`Grep`) in `allow`,
+    because it would let an agent read the whole disk;
+  - web access: if an agent only needs certain sites, allow `WebFetch(domain:example.com)`
+    instead of `WebFetch`. Anything an agent can read, it could send out through
+    a web request if a page it reads tricks it, so keep secrets off the board;
+  - posting notes needs `Bash` in `tools` and `Bash(post-note *)` in `allow`.
+    Don't allow other Bash commands unless the job truly needs one, and then
+    only that exact command: a shell can do anything the human can;
+  - secrets: put them in `.env` and list the names an agent needs in its
+    `role.json` `env` (a service: `requires_env`/`env` in its `[[service]]`).
+    Nothing gets a `.env` value it doesn't name;
+  - the engine never lets agents change `agents/`, `board.toml`, `bin/`, `.env`
+    or the board's bookkeeping, so don't design agents that need to;
   - writing files needs `Write`/`Edit` in `tools` plus `Edit(...)` path rules, like
     `Edit({board}/knowledge/**)`. Use `Edit(...)`, not `Write(...)`: an Edit rule covers
     the Write tool too, and a Write rule alone is denied in headless runs;

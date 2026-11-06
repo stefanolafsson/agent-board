@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "engine"))
-from boardlib import HUMAN, Note, new_chain_id, post_note  # noqa: E402
+from boardlib import HUMAN, Note, NoteError, new_chain_id, post_note  # noqa: E402
 
 
 def main() -> None:
@@ -38,7 +38,10 @@ def main() -> None:
         chain=os.environ["BOARD_CHAIN"] if in_run else new_chain_id(),
         hop=int(os.environ.get("BOARD_HOP", "0")) + 1 if in_run else 0,
     )
-    path = post_note(note)
+    try:
+        path = post_note(note)
+    except NoteError as exc:
+        sys.exit(f"post-note: {exc}")
     print(f"posted {path.name} (to={note.to}, chain={note.chain}, hop={note.hop})")
 
 

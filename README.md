@@ -76,7 +76,7 @@ my-board/
   agents/<role>/      CLAUDE.md (instructions) + role.json (model, tools, permissions)
   bin/                the board's own scripts; agents can run them by name
   board/              inbox, processing, archive, <human>/, knowledge/, state/, activity.log
-  .env                secrets for agents and services (ignored by git, if you use it)
+  .env                secrets; each service and agent gets only the ones it names (ignored by git)
   logs/               watcher log and raw output of each run (ignored by git)
 ```
 
@@ -90,6 +90,7 @@ name = "Research Board"     # dashboard title
 human = "yourname"            # notes to this name go to board/yourname/
 port = 8787
 # escalate_to = "some-agent" # failures go to you unless this names an agent
+# daily_budget_usd = 10     # most the agents may spend in a day (default 10)
 
 [[button]]                  # quick buttons on the dashboard, one note each
 label = "Run morning search"
@@ -105,7 +106,8 @@ body = "Run the daily literature search."
 [[service]]                 # programs that run next to the watcher, e.g. bridges
 name = "intranet bridge"
 command = ["python3", "bin/intranet-bridge"]   # "python3" = the engine's Python
-requires_env = "SOME_MCP_URL"            # skipped unless set (e.g. in .env)
+requires_env = "SOME_MCP_URL"            # skipped unless set (e.g. in .env); the service gets this
+# env = ["OTHER_VAR"]                     # and these .env values, and no others
 
 [shortlist]                 # optional panel: board/shortlist/<date>.json items with Accept / Decline.
                             # Decisions go to <date>.feedback.json; an agent reads them on its next run.
@@ -118,17 +120,22 @@ requires_env = "SOME_MCP_URL"            # skipped unless set (e.g. in .env)
   "description": "What this agent does (shown on the dashboard).",
   "model": "sonnet",
   "tools": ["Read", "Glob", "Grep", "Bash", "WebFetch"],
-  "allow": ["Read", "Glob", "Grep", "WebFetch", "Bash(post-note *)"],
+  "allow": ["WebFetch", "Bash(post-note *)"],
   "max_budget_usd": 1.0,
   "timeout_s": 900,
   "join": false,
   "resident": false,
-  "add_dirs": []
+  "add_dirs": [],
+  "env": []
 }
 ```
 
-`add_dirs` gives the agent extra folders (`{root}` is the whole board folder). `tools` is what exists in the run, and `allow` is what may run without asking (anything
-else is denied, since nobody is there to approve it). In `allow`, `{board}`
+Agents can read their own folder and `board/` without a rule. `add_dirs` gives the
+agent extra folders (`{root}` is the whole board folder, `.env` included, so prefer a
+subfolder). The watcher ignores a bare `Read`, `Glob` or `Grep` in `allow`, since that
+would open the whole disk to an agent a web page might be steering; allow a path
+instead, like `Read(//Users/me/papers/**)`. `env` names the `.env` values this agent gets; it gets no others. `tools` is what exists in the run, and `allow` is what may run without asking (anything
+else is denied, since nobody is there to approve it). Your own Claude Code settings don't apply to agent runs, so a rule you allowed for your own work doesn't widen what agents may do. In `allow`, `{board}`
 becomes the board folder's absolute path, e.g. `Edit({board}/knowledge/**)`. Path rules
 for writing files use `Edit(...)`: it covers both the Write and Edit tools, while a
 `Write(...)` rule doesn't let headless runs write (the watcher adds the `Edit` form for you).
@@ -187,6 +194,11 @@ check blocks quoted arguments that contain a line starting with `#`.
 - **Loop guards**: a note past `BOARD_MAX_HOPS` (6) hand-offs, or a chain past
   `BOARD_MAX_RUNS_PER_CHAIN` (40) runs, is archived as `blocked`. Unknown roles
   are `unrouted`; files without a valid header are `invalid`.
+- **Daily budget**: a run starts only if today's spending, plus the full
+  `max_budget_usd` of every run in progress and of this one, stays within
+  `daily_budget_usd` (default $10). Other notes wait in the inbox until the next
+  day, and you get one note saying so. A run whose cost is unknown (it timed out
+  or crashed) counts as its full `max_budget_usd`.
 
 Every run is logged to `board/activity.log` (time, role, trigger, outcome, files,
 cost, denied tools). If the board folder is a git repo (optional; `board init`
@@ -194,6 +206,34 @@ doesn't create one), `board/` is committed after each run.
 Each run starts with a SessionStart hook (`engine/session_start.py`, passed by
 the watcher) that tells the agent what changed on the board recently. Boards
 need no `.claude/settings.json`.
+
+## Security
+
+Agents read web pages, emails and other agents' notes, any of which can try to
+steer them. The engine limits what a steered agent can do, whatever its
+`role.json` says:
+
+- **Reading:** only its own folder, `board/` and its `add_dirs`. A bare `Read`,
+  `Glob` or `Grep` in `allow` is ignored.
+- **Writing:** never the files that give power: `agents/` (instructions,
+  permissions, settings), `board.toml`, `bin/`, `.git/`, `.env`, `CLAUDE.md`,
+  `logs/`, the engine, or the board's own bookkeeping (`inbox/`, `processing/`,
+  `archive/`, `activity.log`, `state/sessions.json`). Notes go through `post-note`.
+- **Secrets:** `.env` isn't in the engine's environment. Each service and agent
+  gets only the values it names (`requires_env`/`env`).
+- **Notes:** header values are single words, chains and hops can't be reset,
+  and a note can't claim to be from someone else.
+- **Cost:** loop guards per chain, and `daily_budget_usd` for the whole board.
+- **Dashboard:** listens on 127.0.0.1, answers only its own page (not other
+  sites, not DNS rebinding), renders notes as untrusted text, and sends a
+  Content Security Policy that blocks injected scripts and requests to other sites.
+- **Prompts:** note bodies and the session summary are marked as data, and the
+  shared rules tell agents to ignore instructions found in them.
+
+What's left is up to how you design a board. Anything an agent can read, it
+could send out through a web request if a page tricks it, so keep secrets off
+the board and scope `WebFetch` to the sites an agent needs. Don't give agents
+broad `Bash` rules: a shell command can do anything you can.
 
 ## Starting boards automatically
 

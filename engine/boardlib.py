@@ -71,8 +71,44 @@ AGENTS = ROOT / "agents"
 LOGS = ROOT / "logs"
 
 HEADER_KEYS = ("to", "from", "type", "created", "chain", "hop", "subject")
+# Header values must stay on their line: a line break in `type` could otherwise add a
+# forged `from`, a fresh `chain` or a negative `hop` and slip past the loop guards.
+NAME_RE = re.compile(r"\w[\w.-]*")    # to, from, type: one word (letters in any language)
+CHAIN_RE = re.compile(r"[\w-]+")
+CREATED_RE = re.compile(r"[\w:.+-]+")
+
+
+def check_header(to: str, sender: str, type_: str, created: str, chain: str, hop: int) -> None:
+    for key, value in (("to", to), ("from", sender), ("type", type_)):
+        if not NAME_RE.fullmatch(value or ""):
+            raise NoteError(f"`{key}` must be one word (letters, digits, -, _ or .), not {value!r}")
+    if not CHAIN_RE.fullmatch(chain or ""):
+        raise NoteError(f"`chain` must be letters, digits and -, not {chain!r}")
+    if not CREATED_RE.fullmatch(created or ""):
+        raise NoteError(f"`created` must be a timestamp, not {created!r}")
+    if not isinstance(hop, int) or hop < 0:
+        raise NoteError(f"`hop` must be a whole number from 0, not {hop!r}")
 
 _log_lock = threading.Lock()
+
+
+def read_dotenv() -> dict[str, str]:
+    """The board's .env. It is NOT put into the environment: each service and agent
+    gets only the variables it names (`requires_env`/`env` in board.toml, `env` in role.json)."""
+    values = {}
+    path = ROOT / ".env"
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                key, value = line.split("=", 1)
+                values[key.strip().removeprefix("export ").strip()] = value.strip().strip("'\"")
+    return values
+
+
+def named_env(names: list[str]) -> dict[str, str]:
+    """The variables named, from the environment or the board's .env."""
+    secrets_ = read_dotenv()
+    return {name: os.environ.get(name) or secrets_[name] for name in names if os.environ.get(name) or secrets_.get(name)}
 
 
 def child_env(**extra: str) -> dict:
@@ -120,6 +156,7 @@ class Note:
     path: Path | None = None
 
     def render(self) -> str:
+        check_header(self.to, self.sender, self.type, self.created, self.chain, self.hop)
         header = {
             "to": self.to,
             "from": self.sender,
@@ -169,15 +206,18 @@ def parse_note(text: str, path: Path | None = None) -> Note:
     for line in header:
         if ":" in line:
             key, value = line.split(":", 1)
-            fields[key.strip().lower()] = value.strip()
+            key = key.strip().lower()
+            if key in fields:
+                raise NoteError(f"header has `{key}` twice")
+            fields[key] = value.strip()
     for key in ("to", "from", "type"):
         if not fields.get(key):
             raise NoteError(f"header is missing `{key}`")
     try:
-        hop = int(fields.get("hop", 0))
+        hop = int(fields.get("hop") or 0)
     except ValueError:
-        hop = 0
-    return Note(
+        raise NoteError(f"`hop` must be a whole number, not {fields['hop']!r}") from None
+    note = Note(
         to=fields["to"].lower(),
         sender=fields["from"].lower(),
         type=fields["type"],
@@ -188,6 +228,8 @@ def parse_note(text: str, path: Path | None = None) -> Note:
         hop=hop,
         path=path,
     )
+    check_header(note.to, note.sender, note.type, note.created, note.chain, note.hop)
+    return note
 
 
 def read_note(path: Path) -> Note:

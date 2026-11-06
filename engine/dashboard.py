@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
@@ -23,7 +24,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from boardlib import (  # noqa: E402
     ACTIVITY_LOG, BOARD, CONFIG, ENGINE, HUMAN, HUMAN_DIR, INBOX, NAME, PORT, PROCESSING, ROOT, SHORTLIST,
-    Note, child_env, list_roles, load_sessions, now, post_note, read_activity, read_note,
+    Note, NoteError, child_env, list_roles, load_sessions, now, post_note, read_activity, read_note,
 )
 
 PAGE = Path(__file__).resolve().parent / "dashboard.html"
@@ -114,17 +115,22 @@ def reconcile_feedback(day: str) -> dict:
         for line in clicks_path(day).read_text(encoding="utf-8").splitlines():
             try:
                 click = json.loads(line)
-                latest[click["id"]] = click
-            except (json.JSONDecodeError, KeyError, TypeError):
+                if isinstance(click, dict) and isinstance(click.get("id"), str):
+                    latest[click["id"]] = click
+            except json.JSONDecodeError:
                 continue
     changed = False
     for item_id, click in latest.items():
+        if not (isinstance(click.get("at"), str) and click.get("decision") in ("accepted", "declined", None)):
+            continue  # a damaged line; skip it rather than break the dashboard
         entry = feedback.get(item_id)
+        if entry is not None and not isinstance(entry, dict):
+            entry = None
         if click["decision"] is None:
-            if entry and entry.get("at", "") <= click["at"]:
+            if entry and str(entry.get("at", "")) <= click["at"]:
                 del feedback[item_id]
                 changed = True
-        elif not entry or entry.get("at", "") < click["at"]:
+        elif not entry or str(entry.get("at", "")) < click["at"]:
             feedback[item_id] = {"decision": click["decision"], "title": click.get("title", ""),
                                  "at": click["at"], "processed": False}
             changed = True
@@ -184,6 +190,7 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -209,8 +216,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         url = urlparse(self.path)
         if url.path == "/":
-            body = PAGE.read_bytes()
+            # Second line of defence against anything that slips through the markdown
+            # renderer: only the page's own script runs (no inline handlers), and the
+            # page can't load or send anything to another site.
+            nonce = secrets.token_urlsafe(16)
+            body = PAGE.read_text(encoding="utf-8").replace("<script>", f'<script nonce="{nonce}">', 1).encode()
             self.send_response(200)
+            self.send_header("Content-Security-Policy", (
+                f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; img-src 'self' data:; "
+                "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
+            self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -275,8 +290,11 @@ class Handler(BaseHTTPRequestHandler):
             body = button.get("body", "")
             if button.get("body_file"):
                 body = (ROOT / button["body_file"]).read_text(encoding="utf-8")
-            path = post_note(Note(to=button["to"], sender=button.get("from", HUMAN), type=button.get("type", "request"),
-                                  subject=button.get("subject", button["label"]), body=body))
+            try:
+                path = post_note(Note(to=button["to"], sender=button.get("from", HUMAN), type=button.get("type", "request"),
+                                      subject=button.get("subject", button["label"]), body=body))
+            except NoteError as exc:
+                return self._json({"error": f"this button in board.toml is invalid: {exc}"}, 400)
             return self._json({"ok": True, "note": path.name, "to": button["to"]})
 
         if url.path == "/api/feedback" and SHORTLIST_CONFIG:

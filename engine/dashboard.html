@@ -52,7 +52,7 @@
   .event time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
   .event .what { min-width: 0; overflow-wrap: anywhere; }
   .status { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; margin-left: 4px; }
-  .status.running { color: var(--run); } .status.done { color: var(--ok); } .status.error, .status.stuck, .status.blocked, .status.unrouted, .status.invalid { color: var(--err); } .status.delivered { color: var(--warn); }
+  .status.running { color: var(--run); } .status.done { color: var(--ok); } .status.error, .status.stuck, .status.blocked, .status.unrouted, .status.invalid { color: var(--err); } .status.delivered, .status.paused { color: var(--warn); }
   .status.running::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 5px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .meta { font-size: 12px; color: var(--muted); }
@@ -148,18 +148,28 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const hhmm = (ts) => (ts || "").slice(11, 16);
 
-// Notes are markdown. A small renderer for what agents write: headings, lists,
-// quotes, code, links and emphasis. Text is escaped first, so notes can't inject HTML.
+// Notes are markdown written by agents, which a web page may have steered, so
+// treat them as hostile. Code spans and links are pulled out of the raw text
+// first and built from escaped pieces; only then is the rest escaped and given
+// emphasis. Nothing ever runs a pattern over HTML this function produced.
+const URL_CHARS = "[^\\s<>\"'`()\\[\\]{}\\\\]";  // no quotes, brackets or spaces, so a URL can't leave its attribute
+const safeUrl = (url) => /^(https?:\/\/|mailto:)/i.test(url || "") && new RegExp(`^${URL_CHARS}+$`).test(url) ? url : null;
+const link = (url, label) => `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+
 function inlineMd(text) {
-  const codes = [];
-  let s = esc(text).replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) =>
-      /^(https?:|mailto:)/i.test(url) ? `<a href="${url}" target="_blank" rel="noopener">${label}</a>` : m)
-    .replace(/(^|[\s(])(https?:\/\/[^\s<]*[^\s<.,;:!?)])/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>')
+  const parts = [];
+  const keep = (html) => `\u0000${parts.push(html) - 1}\u0000`;
+  let s = String(text ?? "").replace(/\u0000/g, "");
+  s = s.replace(/`([^`]+)`/g, (_, c) => keep(`<code>${esc(c)}</code>`));
+  s = s.replace(/\[([^\]\u0000]+)\]\(([^)\s]+)\)/g, (m, label, url) => safeUrl(url) ? keep(link(url, esc(label))) : m);
+  // A bare URL; trailing punctuation belongs to the sentence, not the URL.
+  s = s.replace(new RegExp(`https?:\\/\\/${URL_CHARS}*[^\\s<>"'\`()\\[\\]{}\\\\.,;:!?]`, "g"),
+                (url) => safeUrl(url) ? keep(link(url, esc(url))) : url);
+  s = esc(s)
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
     .replace(/(^|[^\w])_([^_\s][^_]*)_(?![\w])/g, "$1<em>$2</em>");
-  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => parts[i]);
 }
 
 function md(src) {
@@ -329,7 +339,7 @@ function renderShortlist() {
   const cards = items.map((p) => {
     const decision = (decisions[p.id] || {}).decision;
     return `<div class="paper">
-      <h3><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></h3>
+      <h3>${safeUrl(p.url) ? link(p.url, esc(p.title)) : esc(p.title)}</h3>
       <div class="meta">${esc(p.authors || "")}${p.venue ? " · " + esc(p.venue) : ""}${p.date ? " · " + esc(p.date) : ""}</div>
       <div class="scores">${p.quality != null ? `<span class="score">Quality ${esc(p.quality)}/5</span>` : ""}${p.relevance != null ? `<span class="score">Relevance ${esc(p.relevance)}/5</span>` : ""}${(p.tags || []).map((t) => `<span class="score">${esc(t)}</span>`).join("")}</div>
       ${p.summary ? `<div>${esc(p.summary)}</div>` : ""}
@@ -340,7 +350,7 @@ function renderShortlist() {
       </div></div>`;
   }).join("");
   const considered = (sl.data.considered || []).length
-    ? `<details class="small" style="margin-top:10px"><summary class="muted">${sl.data.considered.length} considered but left out</summary>${sl.data.considered.map((c) => `<div style="margin-top:6px"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a><div class="muted">${esc(c.reason || "")}</div></div>`).join("")}</details>` : "";
+    ? `<details class="small" style="margin-top:10px"><summary class="muted">${sl.data.considered.length} considered but left out</summary>${sl.data.considered.map((c) => `<div style="margin-top:6px">${safeUrl(c.url) ? link(c.url, esc(c.title)) : esc(c.title)}<div class="muted">${esc(c.reason || "")}</div></div>`).join("")}</details>` : "";
   $("shortlist").innerHTML = summary + (cards || `<div class="empty">The curator found nothing worth shortlisting.</div>`) + considered;
 }
 
