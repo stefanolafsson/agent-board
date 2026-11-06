@@ -200,24 +200,29 @@ class Dispatcher:
     def _run(self, role: str, cfg: dict, notes: list[Note], run_id: str, chain: str, trigger: str) -> None:
         started = time.time()
         try:
-            result = run_agent(role, cfg, notes, run_id)
-        except Exception as exc:  # never let one run take the watcher down
-            result = {"event": "error", "outcome": f"watcher error: {exc}", "files": []}
-        # Tools were denied and nothing came out of the run: the chain has silently stopped.
-        if result.get("event") == "done" and result.get("denied") and not result.get("files") \
-                and not notes_posted(role, chain, started):
-            result["event"] = "stuck"
-            result["outcome"] = f"stuck (tools denied, nothing produced): {result['outcome']}"[:300]
-        archived = [rel(archive(n.path)) for n in notes if n.path.exists()]
-        entry = log_activity(role=role, run=run_id, chain=chain, hop=max(n.hop for n in notes), trigger=trigger,
-                             duration_s=round(time.time() - started), notes=archived, **result)
-        say(f"{entry['event']} {role}: {entry['outcome']}")
-        if entry["event"] in ("error", "stuck") or (ESCALATE_DENIED and entry.get("denied")):
-            escalate(entry)
-        self._commit(f"[{role}] {entry['outcome']}"[:200])
-        with self.lock:
-            self.active[chain] -= 1
-            self.busy.discard(role)
+            try:
+                result = run_agent(role, cfg, notes, run_id)
+            except Exception as exc:  # never let one run take the watcher down
+                result = {"event": "error", "outcome": f"watcher error: {exc}", "files": []}
+            # Tools were denied and nothing came out of the run: the chain has silently stopped.
+            if result.get("event") == "done" and result.get("denied") and not result.get("files") \
+                    and not notes_posted(role, chain, started):
+                result["event"] = "stuck"
+                result["outcome"] = f"stuck (tools denied, nothing produced): {result['outcome']}"[:300]
+            archived = [rel(archive(n.path)) for n in notes if n.path.exists()]
+            entry = log_activity(role=role, run=run_id, chain=chain, hop=max(n.hop for n in notes), trigger=trigger,
+                                 duration_s=round(time.time() - started), notes=archived, **result)
+            say(f"{entry['event']} {role}: {entry['outcome']}")
+            if entry["event"] in ("error", "stuck") or (ESCALATE_DENIED and entry.get("denied")):
+                escalate(entry)
+            self._commit(f"[{role}] {entry['outcome']}"[:200])
+        except Exception as exc:
+            say(f"error after the {role} run {run_id}: {exc}")
+        finally:
+            # Always release the run, or join roles in this chain and a resident role would wait forever.
+            with self.lock:
+                self.active[chain] -= 1
+                self.busy.discard(role)
         self.scan()
 
     def _commit(self, message: str) -> None:
@@ -249,14 +254,20 @@ def notes_posted(role: str, chain: str, since: float) -> bool:
 def escalate(entry: dict) -> None:
     """Post a note about a failed run, blocked chain or bad note to the human (or escalate_to agent).
 
-    It starts a new chain, and nothing about the escalation agent itself or about
-    an escalation note is escalated, so escalations can't loop.
+    The note continues the chain of what failed, one hop further, so the loop
+    guards also limit escalations: if the escalation agent's fixes keep failing,
+    the chain soon hits its hop or run limit. Problems with the escalation agent
+    itself, or with anything an escalation started, go to the human instead.
     """
-    to_agent = ESCALATE_TO != HUMAN
-    if not ESCALATE_TO or (to_agent and ESCALATE_TO not in list_roles()) or entry.get("role") == ESCALATE_TO:
+    if not ESCALATE_TO:
         return
-    if "escalation" in (entry.get("trigger") or ""):
-        return
+    target = ESCALATE_TO
+    # A blocked chain can't take another run, so only the human can act on it.
+    if target != HUMAN and (target not in list_roles() or entry.get("role") == target
+                            or entry.get("event") == "blocked" or "escalation" in (entry.get("trigger") or "")):
+        target = HUMAN
+    to_agent = target != HUMAN
+    chain = entry.get("chain")
     facts = [
         f"- what happened: {entry['event']}",
         f"- agent: {entry.get('role')}",
@@ -272,8 +283,11 @@ def escalate(entry: dict) -> None:
     next_step = ("Find out why, fix what you're allowed to fix, and tell the human if it needs a decision."
                  if to_agent else "Open a Claude session in the board folder and ask it to look into this.")
     body = "\n".join(["The watcher reports a problem on the board.", "", *facts, "", next_step])
-    post_note(Note(to=ESCALATE_TO, sender="dispatcher", type="escalation",
-                   subject=f"{entry['event']}: {entry.get('role')}: {str(entry.get('outcome', ''))[:70]}", body=body))
+    note = Note(to=target, sender="dispatcher", type="escalation",
+                subject=f"{entry['event']}: {entry.get('role')}: {str(entry.get('outcome', ''))[:70]}", body=body)
+    if chain:
+        note.chain, note.hop = chain, int(entry.get("hop") or 0) + 1
+    post_note(note)
 
 
 def build_prompt(role: str, notes: list[Note], run_id: str) -> str:

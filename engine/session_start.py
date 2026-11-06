@@ -2,8 +2,8 @@
 """SessionStart hook: tell every session what changed on the board recently.
 
 Whatever this prints is added to the session's context. It runs for agent
-runs (the watcher passes it via --settings) and for interactive sessions
-opened in the research folder (.claude/settings.json).
+runs (the watcher passes it via --settings with BOARD_ROLE set); without a
+role it also lists the human's recent notes.
 """
 
 import os

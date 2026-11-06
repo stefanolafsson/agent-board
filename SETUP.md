@@ -103,7 +103,9 @@ Don't build until they agree.
   - `[shortlist]` if they want a daily list to accept or decline. The agent that
     keeps it writes `board/shortlist/<date>.json` (`items` with `id`, `title`,
     `url`, `summary`, `why`), and on every run it must handle the unprocessed
-    decisions in `<date>.feedback.json` and set `"processed": true`;
+    decisions in `<date>.feedback.json` and set `"processed": true`, leaving each
+    entry's other fields (including `at`) as they are. The dashboard also logs
+    every click in `<date>.clicks.jsonl` and restores any the agent overwrites;
   - `[[service]]` for a bridge from an outside source. Write it in `bin/`, use
     `boardlib.post_note`, and put any secret it needs in `.env`.
 

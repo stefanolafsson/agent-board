@@ -9,10 +9,13 @@ The title, port, human's name, buttons and shortlist come from board.toml.
 from __future__ import annotations
 
 import json
+import os
+import re
 import subprocess
 import sys
+import threading
 import time
-from datetime import date
+from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -26,6 +29,11 @@ from boardlib import (  # noqa: E402
 PAGE = Path(__file__).resolve().parent / "dashboard.html"
 BUTTONS = CONFIG.get("button", [])        # [[button]] tables: quick notes posted with one click
 SHORTLIST_CONFIG = "shortlist" in CONFIG  # a [shortlist] table shows the panel
+# Only the dashboard's own page may use it: other websites open in the browser
+# must not be able to press buttons or (through DNS rebinding) read the board.
+ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
+DAY = re.compile(r"\d{4}-\d{2}-\d{2}")  # shortlist dates; anything else could point outside the board
+_feedback_lock = threading.Lock()
 
 
 def note_list(folder: Path, limit: int, with_body: bool = False) -> list[dict]:
@@ -43,25 +51,96 @@ def note_list(folder: Path, limit: int, with_body: bool = False) -> list[dict]:
 
 
 def shortlist(day: str | None) -> dict:
-    dates = sorted((p.stem for p in SHORTLIST.glob("????-??-??.json")), reverse=True)
-    day = day or (dates[0] if dates else f"{date.today():%Y-%m-%d}")
+    dates = sorted((p.stem for p in SHORTLIST.glob("????-??-??.json") if DAY.fullmatch(p.stem)), reverse=True)
+    if not (day and DAY.fullmatch(day)):
+        day = dates[0] if dates else f"{date.today():%Y-%m-%d}"
     path = SHORTLIST / f"{day}.json"
-    data, error = None, None
+    data, error, feedback = None, None, {}
     if path.exists():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             error = f"shortlist file is not valid JSON: {exc}"
-    return {"date": day, "dates": dates, "data": data, "error": error, "feedback": load_feedback(day)}
+    try:
+        with _feedback_lock:
+            feedback = reconcile_feedback(day)
+    except FeedbackError as exc:
+        error = error or str(exc)
+    return {"date": day, "dates": dates, "data": data, "error": error, "feedback": feedback}
+
+
+# Decisions: <day>.feedback.json is what the shortlist agent reads, and it rewrites
+# the file to mark decisions processed. If it rewrites from an older copy while the
+# human clicks, a click can be lost. Every click is therefore also appended to
+# <day>.clicks.jsonl, and any click missing from feedback.json is put back.
+
+class FeedbackError(Exception):
+    pass
 
 
 def feedback_path(day: str) -> Path:
     return SHORTLIST / f"{day}.feedback.json"
 
 
+def clicks_path(day: str) -> Path:
+    return SHORTLIST / f"{day}.clicks.jsonl"
+
+
 def load_feedback(day: str) -> dict:
     path = feedback_path(day)
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise FeedbackError(f"{path.name} is not valid JSON ({exc}); fix or delete it to record decisions") from None
+    if not isinstance(data, dict):
+        raise FeedbackError(f"{path.name} should hold an object of decisions")
+    return data
+
+
+def save_feedback(day: str, feedback: dict) -> None:
+    SHORTLIST.mkdir(parents=True, exist_ok=True)
+    tmp = feedback_path(day).with_suffix(".tmp")
+    tmp.write_text(json.dumps(feedback, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, feedback_path(day))  # the agent never reads half a file
+
+
+def reconcile_feedback(day: str) -> dict:
+    """feedback.json with every click applied that it's missing. Call with _feedback_lock held."""
+    feedback = load_feedback(day)
+    latest: dict[str, dict] = {}
+    if clicks_path(day).exists():
+        for line in clicks_path(day).read_text(encoding="utf-8").splitlines():
+            try:
+                click = json.loads(line)
+                latest[click["id"]] = click
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+    changed = False
+    for item_id, click in latest.items():
+        entry = feedback.get(item_id)
+        if click["decision"] is None:
+            if entry and entry.get("at", "") <= click["at"]:
+                del feedback[item_id]
+                changed = True
+        elif not entry or entry.get("at", "") < click["at"]:
+            feedback[item_id] = {"decision": click["decision"], "title": click.get("title", ""),
+                                 "at": click["at"], "processed": False}
+            changed = True
+    if changed:
+        save_feedback(day, feedback)
+    return feedback
+
+
+def record_click(day: str, item_id: str, decision: str | None, title: str) -> None:
+    with _feedback_lock:
+        load_feedback(day)  # refuse to touch a broken file: the agent's processed flags are in it
+        SHORTLIST.mkdir(parents=True, exist_ok=True)
+        click = {"id": item_id, "decision": decision, "title": title, "at": datetime.now().isoformat(timespec="microseconds")}
+        with clicks_path(day).open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(click, ensure_ascii=False) + "\n")
+        reconcile_feedback(day)
 
 
 def state(query: dict) -> dict:
@@ -113,7 +192,21 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         return json.loads(self.rfile.read(length) or b"{}")
 
+    def _foreign(self, post: bool) -> bool:
+        """Refuse requests that don't come from the dashboard's own page (and say so)."""
+        host = self.headers.get("Host", "")
+        origin = self.headers.get("Origin")
+        ok = host in ALLOWED_HOSTS and (origin is None or origin == f"http://{host}")
+        # A JSON content type means a browser asks first (CORS preflight), which this server never allows.
+        if post and not self.headers.get("Content-Type", "").startswith("application/json"):
+            ok = False
+        if not ok:
+            self._json({"error": "only the dashboard's own page can use this"}, 403)
+        return not ok
+
     def do_GET(self):
+        if self._foreign(post=False):
+            return
         url = urlparse(self.path)
         if url.path == "/":
             body = PAGE.read_bytes()
@@ -154,6 +247,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
     def do_POST(self):
+        if self._foreign(post=True):
+            return
         url = urlparse(self.path)
         try:
             data = self._body()
@@ -189,16 +284,14 @@ class Handler(BaseHTTPRequestHandler):
             # the shortlist reads decisions it hasn't processed yet on its next run.
             day = data.get("date") or f"{date.today():%Y-%m-%d}"
             item_id = data.get("id")
-            if not item_id or data.get("decision") not in ("accepted", "declined", None):
+            if not DAY.fullmatch(str(day)):
+                return self._json({"error": "date must look like 2026-01-31"}, 400)
+            if not item_id or not isinstance(item_id, str) or data.get("decision") not in ("accepted", "declined", None):
                 return self._json({"error": "send an id and a decision (accepted, declined or null)"}, 400)
-            feedback = load_feedback(day)
-            if data["decision"] is None:
-                feedback.pop(item_id, None)
-            else:
-                feedback[item_id] = {"decision": data["decision"], "title": data.get("title", ""),
-                                     "at": now().isoformat(), "processed": False}
-            SHORTLIST.mkdir(parents=True, exist_ok=True)
-            feedback_path(day).write_text(json.dumps(feedback, indent=2, ensure_ascii=False), encoding="utf-8")
+            try:
+                record_click(day, item_id, data.get("decision"), str(data.get("title", "")))
+            except FeedbackError as exc:
+                return self._json({"error": str(exc)}, 409)
             return self._json({"ok": True})
 
         self._json({"error": "not found"}, 404)

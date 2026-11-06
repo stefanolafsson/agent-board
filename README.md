@@ -147,8 +147,10 @@ opens by telling them to skip it.
 Failed runs, blocked chains, notes to unknown agents and broken notes are
 reported to you as `escalation` notes in `board/<human>/`, so you see them on
 the dashboard and in the next session you open. To send them to an agent
-instead, set `escalate_to = "<agent>"` in `board.toml`. Nothing about that agent
-itself or about an escalation is escalated, so this can't loop.
+instead, set `escalate_to = "<agent>"` in `board.toml`. An escalation continues
+the chain of what failed, one hop further, so the loop guards also stop an agent
+that keeps trying to fix the same failure. Problems with that agent itself,
+with anything an escalation started, and blocked chains still go to you.
 
 ## Notes
 
