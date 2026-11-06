@@ -129,7 +129,7 @@ class Note:
             "hop": self.hop,
         }
         if self.subject:
-            header["subject"] = self.subject.replace("\n", " ")
+            header["subject"] = " ".join(self.subject.splitlines())  # one line, so it can't end the header
         lines = ["---", *(f"{k}: {v}" for k, v in header.items()), "---", ""]
         return "\n".join(lines) + self.body.rstrip() + "\n"
 
@@ -156,14 +156,17 @@ class NoteError(ValueError):
 
 
 def parse_note(text: str, path: Path | None = None) -> Note:
-    if not text.startswith("---"):
-        raise NoteError("missing header (file must start with ---)")
-    try:
-        _, header, body = text.split("---", 2)
-    except ValueError:
-        raise NoteError("header is not closed with ---") from None
+    # The header runs between the first two lines that are exactly `---`, so a
+    # `---` inside a value (e.g. a subject) doesn't end it early.
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise NoteError("missing header (file must start with a --- line)")
+    end = next((i for i, line in enumerate(lines[1:], 1) if line.strip() == "---"), None)
+    if end is None:
+        raise NoteError("header is not closed with a --- line")
+    header, body = lines[1:end], "".join(lines[end + 1:])
     fields: dict[str, str] = {}
-    for line in header.strip().splitlines():
+    for line in header:
         if ":" in line:
             key, value = line.split(":", 1)
             fields[key.strip().lower()] = value.strip()
