@@ -212,6 +212,3 @@ closed happens on next launch.
 | `engine/session_start.py` | The SessionStart hook. |
 | `templates/new-board/` | What `board init` copies. |
 | `SETUP.md` | The steps Claude follows to set up a new board with someone. |
-
-The minimal teaching version for workshop participants, which works on Mac
-and Windows, is a separate repo: `agent-board-kit`.
